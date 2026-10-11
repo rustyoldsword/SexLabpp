@@ -925,6 +925,7 @@ State Animating
 		; Enjoyment
 		If (_bEnjEnabled)
 			_FullEnjoyment = 0
+			_EnjFrac = 0.0
 			_PainLevel = 0.0
 			_PainApplied = 0.0
 			_arousalBase = 0
@@ -1218,6 +1219,7 @@ float _PainInterCur
 float _PainLevel
 float _PainApplied
 int _FullEnjoyment
+float _EnjFrac ; SLPP enjoyment fix: fractional part of the per-tick gain (int truncation made small gains vanish)
 
 Function ResetEnjoymentVariables()
 	; Defaults
@@ -1240,6 +1242,7 @@ Function ResetEnjoymentVariables()
 	_PainLevel = 0.0
 	_PainApplied = 0.0
 	_FullEnjoyment = 0
+	_EnjFrac = 0.0
 EndFunction
 
 Function UpdateBaseEnjoymentCalculations()
@@ -1276,7 +1279,19 @@ Function UpdateEffectiveEnjoymentCalculations()
 		return
 	EndIf
 	_InterFactor = _Thread.CalcInteractionFactor(_ActorRef, _CurrentInteractions)
-	_FullEnjoyment = PapyrusUtil.ClampInt(CalcEnjoymentAndPainDelta() as int, -100, 100)
+	If (sslSystemConfig.GetSettingBool("bPatchEnjoyment"))
+		; Carry the fractional part over: CalcEnjoymentAndPainDelta() as int dropped any gain below 1, so actors
+		; with a small interaction factor (e.g. most male roles) never advanced.
+		float enjTarget = CalcEnjoymentAndPainDelta()
+		float enjAcc = _EnjFrac + (enjTarget - _FullEnjoyment as float)
+		int enjWhole = enjAcc as int
+		_EnjFrac = enjAcc - enjWhole as float
+		_FullEnjoyment = PapyrusUtil.ClampInt(_FullEnjoyment + enjWhole, -100, 100)
+	Else
+		; stock SexLab P+ 2.19.0
+		_FullEnjoyment = PapyrusUtil.ClampInt(CalcEnjoymentAndPainDelta() as int, -100, 100)
+		_EnjFrac = 0.0
+	EndIf
 	UpdateArousalStat()
 	If (_Config.DebugMode)
 		DebugEffectiveCalcVariables()

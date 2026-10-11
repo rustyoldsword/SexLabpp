@@ -1,8 +1,11 @@
 #include "sslThreadModel.h"
 
+#include "Registry/Util/Wardrobe.h"
+
 #include "Registry/Library.h"
 #include "Registry/Stats.h"
 #include "Registry/Util/RayCast.h"
+#include "Registry/Util/Scale.h"
 #include "Registry/Util/RayCast/ObjectBound.h"
 #include "Thread/Collision/CollisionHandler.h"
 #include "Thread/Interaction/Interaction.h"
@@ -120,13 +123,23 @@ namespace Papyrus::ThreadModel
                 a_mergewith.resize(3, nullptr);
             }
             REX::EnumSet<Strip> stripnum(static_cast<Strip>(a_stripdata));
-            if (stripnum == Strip::None) {
+            // Clothing tab switch off: no wardrobe rules at all, the stock early return for "strip nothing"
+            const bool wardrobeOn = Settings::bPatchClothing;
+            const auto wardrobe = Registry::Wardrobe::GetSingleton();
+            const auto rules = wardrobeOn ? std::optional{ wardrobe->Resolve(actor) } : std::nullopt;
+            // A scene without stripping still has to honour groups the user explicitly asked to strip
+            const bool sceneStrips = stripnum != Strip::None;
+            if (!wardrobeOn && !sceneStrips) {
                 logger::info("Using stripping policy: None");
                 return a_mergewith;
             }
             uint32_t slots;
             bool weapon;
-            if (a_overwrite.size() >= 2) {
+            if (!sceneStrips) {
+                logger::info("Using stripping policy: None");
+                slots = 0;
+                weapon = false;
+            } else if (a_overwrite.size() >= 2) {
                 slots = a_overwrite[0];
                 weapon = a_overwrite[1];
             } else if (stripnum.all(Strip::All)) {
@@ -152,33 +165,51 @@ namespace Papyrus::ThreadModel
             }
             const auto stripconfig = UserData::StripData::GetSingleton();
             const auto manager = RE::ActorEquipManager::GetSingleton();
+            const bool keepHeels = Settings::bPatchHeels && Settings::bHeelKeepShoes && Registry::Scale::GetSingleton()->WearsHighHeels(actor);
             for (const auto& [form, data] : actor->GetInventory()) {
                 if (!data.second->IsWorn()) {
                     continue;
                 }
-                switch (stripconfig->CheckStrip(form)) {
-                case UserData::Strip::NoStrip:
+                const auto itemStrip = stripconfig->CheckStrip(form);
+                if (itemStrip == UserData::Strip::NoStrip) {
                     continue;
-                case UserData::Strip::Always:
-                    break;
-                case UserData::Strip::None:
-                    if (form->IsWeapon() && !weapon) {
+                }
+                // The wardrobe has the last word: what the user pinned beats what the scene asks for
+                const auto group = wardrobeOn ? Registry::Wardrobe::Classify(form) : Registry::WardrobeGroup{};
+                const auto userRule = rules ? rules->Strip(group) : Registry::StripRule::Auto;
+                if (userRule == Registry::StripRule::Keep) {
+                    continue;
+                }
+                if (userRule == Registry::StripRule::Auto) {
+                    if (!sceneStrips) {
                         continue;
-                    } else if (const auto biped = form->As<RE::BGSBipedObjectForm>()) {
-                        const auto biped_slots = biped->GetSlotMask().underlying();
-                        if ((biped_slots & slots) == 0) {
+                    }
+                    if (itemStrip == UserData::Strip::None) {
+                        if (form->IsWeapon() && !weapon) {
                             continue;
+                        } else if (const auto biped = form->As<RE::BGSBipedObjectForm>()) {
+                            const auto biped_slots = biped->GetSlotMask().underlying();
+                            if ((biped_slots & slots) == 0) {
+                                continue;
+                            }
+                            constexpr auto feet = static_cast<uint32_t>(SlotMask::kFeet);
+                            constexpr auto body = static_cast<uint32_t>(SlotMask::kBody);
+                            if (keepHeels && form->IsArmor() && (biped_slots & feet) != 0 && (biped_slots & body) == 0) {
+                                logger::info("Keeping high heels {:X} on {:X}", form->GetFormID(), actor->GetFormID());
+                                continue;
+                            }
                         }
                     }
-                    break;
                 }
-                if (form->IsWeapon() && actor->GetActorRuntimeData().currentProcess) {
-                    if (actor->GetActorRuntimeData().currentProcess->GetEquippedRightHand() == form)
-                        a_mergewith[Right] = form;
-                    else
-                        a_mergewith[Left] = form;
-                } else {
-                    a_mergewith.push_back(form);
+                if (!rules || wardrobe->OnStripped(actor, form, group, rules->Redress(group))) {
+                    if (form->IsWeapon() && actor->GetActorRuntimeData().currentProcess) {
+                        if (actor->GetActorRuntimeData().currentProcess->GetEquippedRightHand() == form)
+                            a_mergewith[Right] = form;
+                        else
+                            a_mergewith[Left] = form;
+                    } else {
+                        a_mergewith.push_back(form);
+                    }
                 }
                 manager->UnequipObject(actor, form);
             }

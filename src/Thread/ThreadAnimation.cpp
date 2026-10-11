@@ -403,6 +403,20 @@ namespace Thread
         for (auto&& instance : instances) {
             instance->UpdateFixedLengthTimer(timeoutDelta);
             instance->UpdatePendingAnimations(timeoutDelta);
+            instance->UpdateHeels(timeoutDelta);
+        }
+    }
+
+    void Instance::UpdateHeels(float a_delta)
+    {
+        if (!activeStage) {
+            return;
+        }
+        const bool animationRunning = pendingAnimations.empty();
+        for (const auto& position : positions) {
+            if (const auto actor = position.data.GetActor()) {
+                Registry::Scale::GetSingleton()->UpdateHeels(actor, a_delta, animationRunning);
+            }
         }
     }
 
@@ -540,7 +554,12 @@ namespace Thread
             if (firstDispatch) {
                 const auto& positionInfo = activeScene->GetNthPosition(pending.position);
                 Collision::CollisionHandler::AddActor(pending.actor->GetFormID());
-                Registry::Scale::GetSingleton()->SetScale(pending.actor, positionInfo->data.GetRace(), positionInfo->data.GetScale());
+                if (Settings::bPatchPetite && ShouldPreserveActorScale(pending.actor)) {
+                    logger::info("Scene scaling preserved for petite actor {:X}.", pending.actor->GetFormID());
+                    Registry::Scale::GetSingleton()->SetHeelsOnly(pending.actor);
+                } else {
+                    Registry::Scale::GetSingleton()->SetScale(pending.actor, positionInfo->data.GetRace(), positionInfo->data.GetScale());
+                }
             }
             ReassertPlacement(pending.position, firstDispatch);
             pending.dispatchAttempts++;

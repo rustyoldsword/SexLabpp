@@ -40,33 +40,18 @@ int32_t Registry::IsValidActorImpl(RE::Actor* a_actor)
     if (validfaction != 1)
         return validfaction;
 
-
     const RaceKey race{ a_actor };
     if (!Settings::bAllowCreatures && !race.Is(RaceKey::Human)) {
         return -17;
     }
+
     switch (race) {
     case RaceKey::Human:
         {
             if (a_actor->IsChild())
                 return -11;
-            if (Scale::GetSingleton()->GetScale(a_actor) < Settings::fMinScale)
+            if (!(Settings::bPatchPetite && Settings::bAllowShortAdultHumans) && Scale::GetSingleton()->GetScale(a_actor) < Settings::fMinScale)
                 return -11;
-
-            /* below might be interesting to investigate if GetScale() isnt working reliably
-			 The function calculates the height difference between left foot and head,
-			 but may be unreliable if there are mods changing proportions or if an animation puts head close to foot
-			*/
-            // const auto foot = a_actor->GetNodeByName("CME L Foot [Lft ]");
-            // const auto head = a_actor->GetNodeByName("NPC Head [Head]");
-            // if (!foot || !head)
-            // 	return true;
-            // const auto& footZ = foot->world.translate.z;
-            // const auto& headZ = head->world.translate.z;
-            // const auto& difference = headZ - footZ;
-            // if (difference < 95) {
-            // 	return false;
-            // }
         }
         return true;
     case RaceKey::AshHopper:

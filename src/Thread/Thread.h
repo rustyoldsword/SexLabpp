@@ -10,6 +10,16 @@ namespace Thread
         constexpr static const char* CENTER_REF_NAME{ "CenterAlias" };
 
       public:
+        enum class SceneProfile
+        {
+            Normal,
+            PetiteFemale,
+            PetiteMaleSMF,
+            PetiteMaleMSMF,
+            PetiteMaleSMSMF,
+            PetiteMaleSMFF,
+        };
+
         enum class FurniturePreference
         {
             Disallow = 0,
@@ -220,6 +230,11 @@ namespace Thread
         };
 
         void FinalizeInstanceMake();
+        void FilterScenesByProfile();
+        void FilterScenesByDevices(FurniturePreference a_furniturePreference);
+        SceneProfile GetSceneProfile() const;
+        bool IsCompatibleSceneProfile(const Registry::Scene* a_scene, SceneProfile a_profile) const;
+        bool ShouldPreserveActorScale(RE::Actor* a_actor) const;
         RE::Actor* InitializeReferences(const std::vector<RE::Actor*>& a_submissives);
         std::vector<Registry::ActorFragment> InitializeScenes(const SceneMapping& a_scenes, FurniturePreference a_furniturePreference);
         std::vector<const Registry::Scene*>& InitializeCenter(RE::Actor* centerAct, FurniturePreference furniturePreference);
@@ -236,6 +251,7 @@ namespace Thread
         void CancelFixedLengthTimer();
         void UpdateFixedLengthTimer(float a_delta);
         void UpdatePendingAnimations(float a_delta);
+        void UpdateHeels(float a_delta);
         void UpdatePendingRecoveries(float a_delta);
         void ReassertPlacement(size_t a_position, bool a_force);
         static void RestorePreparedActors(RE::TESQuest* a_linkedQst);

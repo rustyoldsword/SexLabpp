@@ -125,3 +125,10 @@ MCM_SETTING(iEnjGameMagickaCost, 10)
 MCM_SETTING(iGameEnjAdjAmount, 1)
 MCM_SETTING(bGameRequiredOnHighEnj, false)
 MCM_SETTING(bGameSpamDelayPenalty, false)
+
+// RustyOldSword patches - feature switches (MCM page "RustyOldSword Patches"). false = the stock SexLab P+ code path.
+MCM_SETTING(bPatchPetite, true)
+MCM_SETTING(bPatchHeels, true)
+MCM_SETTING(bPatchClothing, true)
+MCM_SETTING(bPatchDevices, true)
+MCM_SETTING(bPatchEnjoyment, true)

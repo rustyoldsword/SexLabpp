@@ -1,11 +1,76 @@
 #include "Thread.h"
 
+#include "Registry/Define/RaceKey.h"
+#include "Registry/Define/Sex.h"
 #include "Registry/Library.h"
+#include "Registry/Util/Scale.h"
+#include "Registry/Util/Wardrobe.h"
 #include "Registry/Util/RayCast/Offsets.h"
 #include "Thread/Hooks.h"
 #include "Thread/Interface/SceneHUD.h"
 #include "Thread/Interface/StageSelectMenu.h"
 #include "Util/Script.h"
+
+namespace
+{
+    constexpr std::string_view PETITE_MALE_MSMF_TAG{ "msmf" };
+
+    bool IsShortAdultMale(RE::Actor* a_actor)
+    {
+        return a_actor && Registry::GetSex(a_actor) == Registry::Sex::Male && Registry::RaceKey{ a_actor }.Is(Registry::RaceKey::Human) &&
+               Registry::Scale::GetSingleton()->GetScale(a_actor) <= Settings::fPetiteAdultScale;
+    }
+
+    void PrioritizePetiteMaleMSMFAssignment(const Registry::Scene* a_scene, const std::vector<Thread::Instance::Position>& a_positions,
+        std::vector<std::vector<RE::Actor*>>& a_assignments)
+    {
+        if (!a_scene->IsCompatibleTags(Registry::TagDetails{ PETITE_MALE_MSMF_TAG })) {
+            return;
+        }
+
+        RE::Actor* petiteMale{ nullptr };
+        for (const auto& position : a_positions) {
+            const auto actor = position.data.GetActor();
+            if (!IsShortAdultMale(actor)) {
+                continue;
+            }
+            if (petiteMale) {
+                return;
+            }
+            petiteMale = actor;
+        }
+        if (!petiteMale) {
+            return;
+        }
+
+        size_t malePositions = 0;
+        std::optional<size_t> petiteMalePosition{};
+        for (size_t i = 0; i < a_scene->CountPositions(); i++) {
+            if (!a_scene->GetNthPosition(i)->IsMale()) {
+                continue;
+            }
+            if (++malePositions == 1) {
+                petiteMalePosition = i;
+                break;
+            }
+        }
+        if (!petiteMalePosition) {
+            return;
+        }
+
+        const auto preferred = std::ranges::find_if(a_assignments, [&](const auto& a_assignment) {
+            return a_assignment.at(*petiteMalePosition) == petiteMale;
+        });
+        if (preferred == a_assignments.end()) {
+            return;
+        }
+        if (preferred != a_assignments.begin()) {
+            std::iter_swap(a_assignments.begin(), preferred);
+        }
+        logger::info("Selected petite male {:X} for MSMF scene {} position {}.", petiteMale->GetFormID(), a_scene->id,
+            *petiteMalePosition + 1);
+    }
+}
 
 namespace Thread
 {
@@ -46,6 +111,17 @@ namespace Thread
                     Hooks::SetWeaponDrawBlocked(false);
                 }
                 instance->ReleaseAnimations();
+                {
+                    // Put back what the clothing panel took off, then forget the scene-only rules
+                    const auto actors = instance->GetActors();
+                    std::vector<bool> redressAllowed;
+                    redressAllowed.reserve(actors.size());
+                    for (const auto actor : actors) {
+                        const auto position = instance->GetPosition(actor);
+                        redressAllowed.push_back(!position || !position->data.IsSubmissive() || Settings::bRedressVictim);
+                    }
+                    Registry::Wardrobe::GetSingleton()->EndScene(actors, redressAllowed);
+                }
                 return true;
             });
         }
@@ -130,13 +206,16 @@ namespace Thread
         const auto fragments = std::ranges::fold_left(positions, std::vector<Registry::ActorFragment>{}, [](auto&& acc, const auto& it) {
             return (acc.push_back(it.data), acc);
         });
-        const auto newAssignments = a_scene->FindAssignments(fragments);
+        auto newAssignments = a_scene->FindAssignments(fragments);
         if (newAssignments.empty()) {
             logger::warn("Scene {} has no valid assignments.", a_scene->id);
             return false;
         }
+        if (Settings::bPatchPetite) {
+            PrioritizePetiteMaleMSMFAssignment(a_scene, positions, newAssignments);
+        }
         CancelFixedLengthTimer();
-        assignments = newAssignments;
+        assignments = std::move(newAssignments);
         activeScene = a_scene;
         ReleaseAnimations();
         pendingAnimations.clear();

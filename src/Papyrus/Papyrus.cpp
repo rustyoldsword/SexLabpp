@@ -1,5 +1,6 @@
 #include "Papyrus.h"
 
+#include "SLPPatches.h"
 #include "SexLabRegistry.h"
 #include "SexLabUtil.h"
 #include "sslActorStats.h"
@@ -33,6 +34,7 @@ namespace Papyrus
         papyrus->Register(Papyrus::ThreadLibrary::Register);
         papyrus->Register(Papyrus::ThreadModel::Register);
         papyrus->Register(Papyrus::VoiceSlots::Register);
+        papyrus->Register(Papyrus::Patches::Register);
         //papyrus->Register(Papyrus::ConsoleCommand::Register);
 
         return true;

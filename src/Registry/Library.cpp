@@ -179,7 +179,9 @@ namespace Registry
     {
         std::shared_lock lock{ _mVoice };
         if (auto saved = GetSavedVoice(a_actor->GetFormID())) {
-            return saved;
+            if (!Settings::bPatchPetite || a_tags.MatchTags(saved->tags)) {
+                return saved;
+            }
         }
         const RaceKey actRace{ a_actor };
         if (!actRace.IsValid()) {

@@ -1,5 +1,6 @@
 #include "SceneHUD.h"
 #include "Elements/AnimSpeedOverlay.h"
+#include "Elements/ClothingPanel.h"
 #include "Elements/ElementCtrlPanel.h"
 #include "Elements/EnjBarsOverlay.h"
 #include "Elements/OffsetAdjustPanel.h"
@@ -17,6 +18,7 @@ namespace Thread::Interface
         ThreadConfigPanel threadConfigPanel;
         SceneSelectPanel sceneSelectPanel;
         OffsetAdjustPanel offsetAdjustPanel;
+        ClothingPanel clothingPanel;
         ElementCtrlPanel elementCtrlPanel;
         PseudoPanelStack pseudoPanelStack;
         DebugNodeDraw debugNodeDraw;
@@ -152,6 +154,9 @@ namespace Thread::Interface
         case PanelId::kOffsetAdjust:
             _elements->offsetAdjustPanel.Render(*this);
             break;
+        case PanelId::kClothing:
+            _elements->clothingPanel.Render(*this);
+            break;
         case PanelId::kElementControl:
             _elements->elementCtrlPanel.Render(*this);
             break;
@@ -189,6 +194,9 @@ namespace Thread::Interface
             case PanelId::kOffsetAdjust:
                 _elements->offsetAdjustPanel.Close();
                 break;
+            case PanelId::kClothing:
+                _elements->clothingPanel.Close();
+                break;
             case PanelId::kElementControl:
                 _elements->elementCtrlPanel.Close();
                 break;
@@ -218,6 +226,9 @@ namespace Thread::Interface
             break;
         case PanelId::kOffsetAdjust:
             _elements->offsetAdjustPanel.Open(*this);
+            break;
+        case PanelId::kClothing:
+            _elements->clothingPanel.Open(*this);
             break;
         case PanelId::kElementControl:
             _elements->elementCtrlPanel.Open(*this);

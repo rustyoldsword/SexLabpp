@@ -1,6 +1,8 @@
 #include "Papyrus/Papyrus.h"
 #include "Registry/Library.h"
 #include "Registry/Stats.h"
+#include "Registry/Util/Scale.h"
+#include "Registry/Util/Wardrobe.h"
 #include "Serialization.h"
 #include "Thread/Collision/CollisionHandler.h"
 #include "Thread/Hooks.h"
@@ -97,6 +99,7 @@ static void SKSEMessageHandler(SKSE::MessagingInterface::Message* message)
         Registry::Library::GetSingleton()->Initialize();
         Registry::Statistics::StatisticsData::GetSingleton()->Register();
         UserData::StripData::GetSingleton()->Load();
+        Registry::Wardrobe::GetSingleton()->Load();
         break;
     case SKSE::MessagingInterface::kSaveGame:
         std::thread([]() {
@@ -107,6 +110,7 @@ static void SKSEMessageHandler(SKSE::MessagingInterface::Message* message)
         break;
     case SKSE::MessagingInterface::kPostLoadGame:
         // EventHandler::GetSingleton()->Register();
+        Registry::Scale::GetSingleton()->CleanupStaleHeels();
         break;
     }
 }

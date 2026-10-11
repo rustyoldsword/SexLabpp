@@ -36,6 +36,8 @@ Event OnVersionUpdate(int version)
 EndEvent
 
 Event OnGameReload()
+	; RustyOldSword build: name shown in the MCM list (SkyUI registers it once per save, so it shows on a new game)
+	ModName = "++ Sexlab 2.19 (DwemerMods)"
 	RegisterForModEvent("SKICP_pageSelected", "OnPageSelected")
 	parent.OnGameReload()
 EndEvent
@@ -149,6 +151,7 @@ Event OnConfigOpen()
 	_expression = sslExpressionSlots.GetAllProfileIDs()
 	_expressionIdx = 0
 	_phaseidx = 0
+	EnsurePatchPages()
 EndEvent
 
 Event OnConfigClose()
@@ -188,6 +191,10 @@ Event OnPageReset(string page)
 			PlayerHotkeys()
 		ElseIf (page == "$SSL_RebuildClean")
 			RebuildClean()
+		ElseIf (page == RSO_PATCH_PAGE)
+			RSOPatchesPage()
+		ElseIf (page == RSO_INTEGRATION_PAGE)
+			RSOIntegrationsPage()
 		EndIf
 	EndIf
 EndEvent
@@ -986,6 +993,138 @@ State RebuildStraponList
 EndState
 
 ; ------------------------------------------------------- ;
+; --- RustyOldSword Patches                          --- ;
+; ------------------------------------------------------- ;
+; Feature switches of the RustyOldSword SexLabUtil.dll build and a read-only page of the mods that
+; integrate with it. The switches are plain SexLab settings (mcm.def), toggled by the generic "b..." branch
+; of OnSelectST; with all of them off the DLL runs the stock SexLab P+ code paths.
+
+String Property RSO_PATCH_PAGE = "RustyOldSword Patches" AutoReadOnly Hidden
+String Property RSO_INTEGRATION_PAGE = "Integrations" AutoReadOnly Hidden
+
+String[] _rsoIntegrations
+
+Function EnsurePatchPages()
+	If (Pages.Find(RSO_PATCH_PAGE) < 0)
+		Pages = PapyrusUtil.PushString(Pages, RSO_PATCH_PAGE)
+	EndIf
+	If (Pages.Find(RSO_INTEGRATION_PAGE) < 0)
+		Pages = PapyrusUtil.PushString(Pages, RSO_INTEGRATION_PAGE)
+	EndIf
+EndFunction
+
+Function RSOPatchesPage()
+	SetCursorFillMode(TOP_TO_BOTTOM)
+	AddHeaderOption("RustyOldSword Patches " + SLPPatches.GetPatchVersion())
+	AddStateOptionBool("bPatchPetite", "Petite Profiles")
+	AddStateOptionBool("bPatchHeels", "Heels Compensation")
+	AddStateOptionBool("bPatchClothing", "Clothing tab")
+	AddStateOptionBool("bPatchDevices", "Devious Devices scene filter")
+	AddStateOptionBool("bPatchEnjoyment", "Enjoyment fix")
+	AddEmptyOption()
+	AddTextOption("All switches off", "stock SexLab P+", OPTION_FLAG_DISABLED)
+	AddTextOption("Changes apply", "from the next scene", OPTION_FLAG_DISABLED)
+
+	SetCursorPosition(1)
+	AddHeaderOption("Status")
+	AddTextOption("SexLab P+", GetStringVer(), OPTION_FLAG_DISABLED)
+	int active = 0
+	If (sslSystemConfig.GetSettingBool("bPatchPetite"))
+		active += 1
+	EndIf
+	If (sslSystemConfig.GetSettingBool("bPatchHeels"))
+		active += 1
+	EndIf
+	If (sslSystemConfig.GetSettingBool("bPatchClothing"))
+		active += 1
+	EndIf
+	If (sslSystemConfig.GetSettingBool("bPatchDevices"))
+		active += 1
+	EndIf
+	If (sslSystemConfig.GetSettingBool("bPatchEnjoyment"))
+		active += 1
+	EndIf
+	AddTextOption("Active patches", active + " of 5", OPTION_FLAG_DISABLED)
+	AddTextOption("Integrations", "see the next page", OPTION_FLAG_DISABLED)
+EndFunction
+
+String Function RSOPatchInfo(String asSetting)
+	If (asSetting == "bPatchPetite")
+		return "Short adult actors (Petite) take part in scenes and get scenes tagged Petite, petite smf/msmf seating and Petite voices.\nOff: stock scale check and scene choice. Applies from the next scene."
+	ElseIf (asSetting == "bPatchHeels")
+		return "High heels in scenes: an actor standing on the feet keeps the heels and is scaled to the animation, everyone else has the heel lift removed; heels are not stripped.\nOff: stock scaling. Applies from the next scene."
+	ElseIf (asSetting == "bPatchClothing")
+		return "Clothing tab in the scene HUD and the strip/redress rules of Wardrobe.yaml.\nOff: stock stripping, the tab is hidden. Applies from the next strip."
+	ElseIf (asSetting == "bPatchDevices")
+		return "Scenes are chosen by the Devious Devices each actor wears (belt, plug, gag, bra, hobble dress, bound arms), with DD's own rules, so DD no longer ends or replaces the scene.\nOff: stock scene choice. Applies from the next scene."
+	ElseIf (asSetting == "bPatchEnjoyment")
+		return "Keeps the fraction of every enjoyment tick, so actors with a small gain (most male roles) no longer get stuck below orgasm.\nOff: stock enjoyment. Applies at once."
+	EndIf
+	return ""
+EndFunction
+
+Function RSOIntegrationsPage()
+	_rsoIntegrations = SLPPatches.GetIntegrations()
+	int half = (_rsoIntegrations.Length + 1) / 2
+	SetCursorFillMode(TOP_TO_BOTTOM)
+	AddHeaderOption("Integrations")
+	int i = 0
+	While (i < _rsoIntegrations.Length)
+		If (i == half)
+			SetCursorPosition(1)
+			AddHeaderOption("")
+		EndIf
+		String[] f = PapyrusUtil.StringSplit(_rsoIntegrations[i], "|")
+		If (f.Length >= 3)
+			int flags = OPTION_FLAG_NONE
+			If (f[1] != "on")
+				flags = OPTION_FLAG_DISABLED
+			EndIf
+			AddTextOptionST("RSOInteg_" + i, f[0], RSOIntegrationValue(i), flags)
+		EndIf
+		i += 1
+	EndWhile
+EndFunction
+
+; Short value for the right column: the detail up to its first ". " / ", " (the full text is the highlight)
+String Function RSOIntegrationValue(int aiIndex)
+	String detail = RSOIntegrationDetail(aiIndex)
+	int cut = StringUtil.Find(detail, " - ")
+	If (cut > 0)
+		detail = StringUtil.Substring(detail, 0, cut)
+	EndIf
+	cut = StringUtil.Find(detail, ". ")
+	If (cut > 0)
+		detail = StringUtil.Substring(detail, 0, cut)
+	EndIf
+	cut = StringUtil.Find(detail, ", ")
+	If (cut > 0)
+		detail = StringUtil.Substring(detail, cut + 2)
+	EndIf
+	return detail
+EndFunction
+
+String Function RSOIntegrationDetail(int aiIndex)
+	If (aiIndex < 0 || aiIndex >= _rsoIntegrations.Length)
+		return ""
+	EndIf
+	String[] f = PapyrusUtil.StringSplit(_rsoIntegrations[aiIndex], "|")
+	If (f.Length < 3)
+		return ""
+	EndIf
+	String detail = f[2]
+	; Afterglow keeps its "who paints" flag in StorageUtil, read through its own script
+	If (f[0] == "Afterglow" && f[1] == "on")
+		If (SLPPlusUBECum.NativeOverlaysEnabled())
+			detail = "Installed, SexLab paints. SexLab's own cum overlays are on (slpube native 1)"
+		Else
+			detail = "Installed, Afterglow paints. Afterglow paints the cum overlays, SexLab's own are off"
+		EndIf
+	EndIf
+	return detail
+EndFunction
+
+; ------------------------------------------------------- ;
 ; --- Mapped State Option Events                      --- ;
 ; ------------------------------------------------------- ;
 
@@ -1136,6 +1275,8 @@ Event OnSelectST()
 	ElseIf (s[0] == "StopCurrentAnimations")
 		ShowMessage("$SSL_StopRunningAnimations", false)
 		ThreadSlots.StopAll()
+	ElseIf (s[0] == "RSOInteg")
+		; read-only row
 	ElseIf (StringUtil.GetNthChar(s[0], 0) == "b")
 		bool newValue = !sslSystemConfig.GetSettingBool(s[0])
 		sslSystemConfig.SetSettingBool(s[0], newValue)
@@ -1468,6 +1609,10 @@ Event OnHighlightST()
 	ElseIf(s[0] == "selectexpression")
 		String[] tags = sslBaseExpression.GetExpressionTags(_expression[_expressionIdx])
 		SetInfoText("Tags: " + PapyrusUtil.StringJoin(tags, ", "))
+	ElseIf (StringUtil.Find(s[0], "bPatch") == 0)
+		SetInfoText(RSOPatchInfo(s[0]))
+	ElseIf (s[0] == "RSOInteg")
+		SetInfoText(RSOIntegrationDetail(s[1] as int))
 	Else
 		String tlKey = "$SSL_" + s[0] + "Highlight"
 		If SexLabUtil.GetTranslation(tlKey) != ""

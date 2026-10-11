@@ -16,6 +16,7 @@ namespace Thread::Interface
         TabDef{ PanelId::kThreadConfig, "General", "ElementUI_ThreadConfig" },
         TabDef{ PanelId::kSceneSelect, "Scenes", "ElementUI_SceneSelect" },
         TabDef{ PanelId::kOffsetAdjust, "Offsets", "ElementUI_OffsetAdjust" },
+        TabDef{ PanelId::kClothing, "Clothing", nullptr },
         TabDef{ PanelId::kElementControl, "Elements", nullptr },
         TabDef{ PanelId::kNone, "Return", nullptr },
     };
@@ -43,7 +44,8 @@ namespace Thread::Interface
         std::array<std::size_t, count> visible{};
         std::size_t visibleCount = 0;
         for (std::size_t i = 0; i < count; ++i) {
-            const bool enabled = !kTabs[i].enableProperty || !inst || inst->GetThreadProperty<bool>(kTabs[i].enableProperty);
+            const bool patchOn = kTabs[i].panel != PanelId::kClothing || Settings::bPatchClothing;
+            const bool enabled = patchOn && (!kTabs[i].enableProperty || !inst || inst->GetThreadProperty<bool>(kTabs[i].enableProperty));
             if (enabled)
                 visible[visibleCount++] = i;
         }

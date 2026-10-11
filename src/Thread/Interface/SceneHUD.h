@@ -17,6 +17,7 @@ namespace Thread::Interface
         kSceneSelect,
         kOffsetAdjust,
         kElementControl,
+        kClothing,
     };
 
     class SceneHUD final
