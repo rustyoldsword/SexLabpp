@@ -655,6 +655,11 @@ State Paused
 		_ActorRef.ResetExpressionOverrides()
 		sslBaseExpression.ClearMFG(_ActorRef)
 		SendDefaultAnimEvent()
+		; SexLab 1.66 reset the SOS/TNG erection here (RestoreActorDefaults); P+ dropped it, so with arousal-mod SOS
+		; integration off the schlong stayed erect after the scene. Same actors that get SOSBend0 on start.
+		If (_sex != 1 && _sex != 4)
+			Debug.SendAnimationEvent(_ActorRef, "SOSFlaccid")
+		EndIf
 		TrackedEvent(TRACK_END)
 		GoToState(STATE_IDLE)
 		Clear()
