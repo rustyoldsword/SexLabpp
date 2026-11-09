@@ -36,7 +36,7 @@ Event OnVersionUpdate(int version)
 EndEvent
 
 Event OnGameReload()
-	; RustyOldSword build: name shown in the MCM list (SkyUI registers it once per save, so it shows on a new game)
+	; Dwemer build: name shown in the MCM list (SkyUI registers it once per save, so it shows on a new game)
 	ModName = "++ Sexlab 2.19 (DwemerMods)"
 	RegisterForModEvent("SKICP_pageSelected", "OnPageSelected")
 	parent.OnGameReload()
@@ -993,13 +993,13 @@ State RebuildStraponList
 EndState
 
 ; ------------------------------------------------------- ;
-; --- RustyOldSword Patches                          --- ;
+; --- Dwemer Patches                          --- ;
 ; ------------------------------------------------------- ;
-; Feature switches of the RustyOldSword SexLabUtil.dll build and a read-only page of the mods that
+; Feature switches of the Dwemer SexLabUtil.dll build and a read-only page of the mods that
 ; integrate with it. The switches are plain SexLab settings (mcm.def), toggled by the generic "b..." branch
 ; of OnSelectST; with all of them off the DLL runs the stock SexLab P+ code paths.
 
-String Property RSO_PATCH_PAGE = "RustyOldSword Patches" AutoReadOnly Hidden
+String Property RSO_PATCH_PAGE = "Dwemer Patches" AutoReadOnly Hidden
 String Property RSO_INTEGRATION_PAGE = "Integrations" AutoReadOnly Hidden
 
 String[] _rsoIntegrations
@@ -1015,12 +1015,16 @@ EndFunction
 
 Function RSOPatchesPage()
 	SetCursorFillMode(TOP_TO_BOTTOM)
-	AddHeaderOption("RustyOldSword Patches " + SLPPatches.GetPatchVersion())
+	AddHeaderOption("Dwemer Patches " + SLPPatches.GetPatchVersion())
 	AddStateOptionBool("bPatchPetite", "Petite Profiles")
 	AddStateOptionBool("bPatchHeels", "Heels Compensation")
 	AddStateOptionBool("bPatchClothing", "Clothing tab")
 	AddStateOptionBool("bPatchDevices", "Devious Devices scene filter")
 	AddStateOptionBool("bPatchEnjoyment", "Enjoyment fix")
+	AddHeaderOption("Native gender and voice")
+	AddStateOptionBool("bPatchTNGGender", "Native TNG gender detection")
+	AddStateOptionBool("bTNGFutaAsMale", "TNG: treat Futa as Male")
+	AddStateOptionBool("bPatchVoiceSexSync", "Native voice sex sync")
 	AddEmptyOption()
 	AddTextOption("All switches off", "stock SexLab P+", OPTION_FLAG_DISABLED)
 	AddTextOption("Changes apply", "from the next scene", OPTION_FLAG_DISABLED)
@@ -1044,7 +1048,13 @@ Function RSOPatchesPage()
 	If (sslSystemConfig.GetSettingBool("bPatchEnjoyment"))
 		active += 1
 	EndIf
-	AddTextOption("Active patches", active + " of 5", OPTION_FLAG_DISABLED)
+	If (sslSystemConfig.GetSettingBool("bPatchTNGGender"))
+		active += 1
+	EndIf
+	If (sslSystemConfig.GetSettingBool("bPatchVoiceSexSync"))
+		active += 1
+	EndIf
+	AddTextOption("Active patches", active + " of 7", OPTION_FLAG_DISABLED)
 	AddTextOption("Integrations", "see the next page", OPTION_FLAG_DISABLED)
 EndFunction
 
@@ -1057,6 +1067,12 @@ String Function RSOPatchInfo(String asSetting)
 		return "Clothing tab in the scene HUD and the strip/redress rules of Wardrobe.yaml.\nOff: stock stripping, the tab is hidden. Applies from the next strip."
 	ElseIf (asSetting == "bPatchDevices")
 		return "Scenes are chosen by the Devious Devices each actor wears (belt, plug, gag, bra, hobble dress, bound arms), with DD's own rules, so DD no longer ends or replaces the scene.\nOff: stock scene choice. Applies from the next scene."
+	ElseIf (asSetting == "bPatchTNGGender")
+		return "Reads TNG_Gentlewoman when SexLab requests an actor's sex. No scanner or forced faction writes. Manual SexLab gender overrides take priority. Disable the standalone GenderBenderTNG scanner when using this integration."
+	ElseIf (asSetting == "bTNGFutaAsMale")
+		return "On: a female-bodied actor with the TNG marker uses Male roles, like GenderBenderTNG. Off: uses SexLab Futa. Changes no race or body. Voice follows body sex separately. Applies to the next actor classification; existing threads keep their captured sex."
+	ElseIf (asSetting == "bPatchVoiceSexSync")
+		return "Keeps compatible saved voices. Replaces wrong-sex voices using body sex, independently of SexLab role gender. Syncs on new/load game, RaceMenu close and every voice request, including changes by other mods before the next scene."
 	ElseIf (asSetting == "bPatchEnjoyment")
 		return "Keeps the fraction of every enjoyment tick, so actors with a small gain (most male roles) no longer get stuck below orgasm.\nOff: stock enjoyment. Applies at once."
 	EndIf
@@ -1609,7 +1625,7 @@ Event OnHighlightST()
 	ElseIf(s[0] == "selectexpression")
 		String[] tags = sslBaseExpression.GetExpressionTags(_expression[_expressionIdx])
 		SetInfoText("Tags: " + PapyrusUtil.StringJoin(tags, ", "))
-	ElseIf (StringUtil.Find(s[0], "bPatch") == 0)
+	ElseIf (StringUtil.Find(s[0], "bPatch") == 0 || s[0] == "bTNGFutaAsMale")
 		SetInfoText(RSOPatchInfo(s[0]))
 	ElseIf (s[0] == "RSOInteg")
 		SetInfoText(RSOIntegrationDetail(s[1] as int))

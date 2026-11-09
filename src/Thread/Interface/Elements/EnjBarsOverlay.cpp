@@ -226,6 +226,7 @@ namespace Thread::Interface
 
         // Calculate layout
         auto* io = ImGuiMCP::GetIO();
+        const float dw = io->DisplaySize.x;
         const float dh = io->DisplaySize.y;
         const auto L = GetLayout(scale, _bars.size());
         const float zoneW = L.zoneW;
@@ -250,7 +251,11 @@ namespace Thread::Interface
             ImGuiMCP::ImGuiWindowFlags_NoFocusOnAppearing | ImGuiMCP::ImGuiWindowFlags_NoNav |
             ImGuiMCP::ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiMCP::ImGuiWindowFlags_NoBackground;
 
-        ImGuiMCP::SetNextWindowPos(ImGuiMCP::ImVec2{ edgeH - clipPadding, dh - winH - edgeV - clipPadding }, ImGuiMCP::ImGuiCond_Always);
+        // Placed by the theme anchors inside the screen margins; the default is the bottom-left corner.
+        const float winX = edgeH + std::clamp(UI::Theme::Enjoyment.anchorX, 0.0f, 1.0f) * std::max(dw - zoneW - edgeH * 2.0f, 0.0f);
+        const float winY = edgeV + std::clamp(UI::Theme::Enjoyment.anchorY, 0.0f, 1.0f) * std::max(dh - winH - edgeV * 2.0f, 0.0f);
+
+        ImGuiMCP::SetNextWindowPos(ImGuiMCP::ImVec2{ winX - clipPadding, winY - clipPadding }, ImGuiMCP::ImGuiCond_Always);
         ImGuiMCP::SetNextWindowSize(ImGuiMCP::ImVec2{ zoneW + clipPadding * 2.0f, winH + clipPadding * 2.0f }, ImGuiMCP::ImGuiCond_Always);
 
         ImGuiMCP::PushStyleVar(ImGuiMCP::ImGuiStyleVar_WindowPadding, ImGuiMCP::ImVec2{ clipPadding, clipPadding });

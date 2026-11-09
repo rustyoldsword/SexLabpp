@@ -68,6 +68,7 @@ namespace Registry
         std::vector<RE::BSFixedString> GetAllVoiceIds(RaceKey a_race) const;
         bool ForEachVoice(std::function<bool(const Voice&)> a_visitor) const;
         const Voice* GetVoice(RE::Actor* a_actor, const TagDetails& a_tags);
+        void SynchronizePlayerVoice();
         const Voice* GetVoice(const TagDetails& a_tags) const;
         const Voice* GetVoice(RaceKey a_race) const;
         const Voice* GetVoiceById(RE::BSFixedString a_voice) const;

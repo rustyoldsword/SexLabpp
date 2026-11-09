@@ -326,6 +326,21 @@ namespace Registry
         }
     }
 
+    void Scale::RefreshBaseNode(RE::Actor* a_actor)
+    {
+        if (!a_actor || !transformInterface) {
+            return;
+        }
+        const auto female = IsFemale(a_actor);
+        if (const auto modernInterface = GetModernInterface()) {
+            modernInterface->UpdateNodeTransforms(a_actor, false, female, basenode);
+            return;
+        }
+        const auto legacyInterface = reinterpret_cast<SKEE::Legacy::INiTransformInterface*>(transformInterface);
+        const SKEE::Legacy::FixedString node(basenode);
+        legacyInterface->UpdateNodeTransforms(a_actor, false, female, node);
+    }
+
     SKEE::INiTransformInterface* Scale::GetModernInterface() const
     {
         if (!transformInterface || transformInterface->GetVersion() < SKEE::INiTransformInterface::Version) {

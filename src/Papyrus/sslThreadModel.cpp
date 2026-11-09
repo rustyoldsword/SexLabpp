@@ -83,6 +83,7 @@ namespace Papyrus::ThreadModel
             } else {
                 handler->RemoveActor(formID);
                 // actor->SetCollision(true);
+                Thread::Instance::ReleaseActorAfterLoad(actor);
             }
         }
 

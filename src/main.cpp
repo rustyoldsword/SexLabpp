@@ -10,6 +10,7 @@
 #include "Thread/Interface/SceneHUD.h"
 #include "Thread/Interface/StageSelectMenu.h"
 #include "Thread/Interface/UI/Theme.h"
+#include "Thread/Thread.h"
 #include "UserData/StripData.h"
 
 // class EventHandler :
@@ -72,6 +73,28 @@ class CrosshairEventFilter final :
     bool _hasCrosshairRef{ false };
 };
 
+class NativePlayerVoiceSync final :
+  public Singleton<NativePlayerVoiceSync>,
+  public RE::BSTEventSink<RE::MenuOpenCloseEvent>
+{
+  public:
+    void Register()
+    {
+        if (auto* ui = RE::UI::GetSingleton()) ui->AddEventSink<RE::MenuOpenCloseEvent>(this);
+    }
+
+    static void QueueSync()
+    {
+        SKSE::GetTaskInterface()->AddTask([] { Registry::Library::GetSingleton()->SynchronizePlayerVoice(); });
+    }
+
+    RE::BSEventNotifyControl ProcessEvent(const RE::MenuOpenCloseEvent* a_event, RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
+    {
+        if (a_event && !a_event->opening && a_event->menuName == "RaceSex Menu") QueueSync();
+        return RE::BSEventNotifyControl::kContinue;
+    }
+};
+
 static void SKSEMessageHandler(SKSE::MessagingInterface::Message* message)
 {
     switch (message->type) {
@@ -97,6 +120,7 @@ static void SKSEMessageHandler(SKSE::MessagingInterface::Message* message)
         Thread::Hooks::Install();
         Thread::Collision::CollisionHandler::Install();
         Registry::Library::GetSingleton()->Initialize();
+        NativePlayerVoiceSync::GetSingleton()->Register();
         Registry::Statistics::StatisticsData::GetSingleton()->Register();
         UserData::StripData::GetSingleton()->Load();
         Registry::Wardrobe::GetSingleton()->Load();
@@ -110,7 +134,13 @@ static void SKSEMessageHandler(SKSE::MessagingInterface::Message* message)
         break;
     case SKSE::MessagingInterface::kPostLoadGame:
         // EventHandler::GetSingleton()->Register();
+        // Scene actors of a mid-scene save (RemoveScale also drops their heel compensation), then the rest
+        Thread::Instance::RestoreActorsAfterLoad();
         Registry::Scale::GetSingleton()->CleanupStaleHeels();
+        NativePlayerVoiceSync::QueueSync();
+        break;
+    case SKSE::MessagingInterface::kNewGame:
+        NativePlayerVoiceSync::QueueSync();
         break;
     }
 }

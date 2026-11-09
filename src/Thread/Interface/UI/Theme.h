@@ -121,6 +121,8 @@ namespace Thread::Interface::UI::Theme
         float waveSpeed = 1.0f;
         float waveSpatialFrequency = 0.6f;
         float waveSecondaryStrength = 2.3f;
+        float anchorX = 0.0f;  // where the bars sit across the screen: 0 left, 0.5 center, 1 right
+        float anchorY = 1.0f;  // 0 top, 0.5 middle, 1 bottom
     };
 
     struct OffsetValues final

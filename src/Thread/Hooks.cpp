@@ -1,6 +1,10 @@
 #include "Hooks.h"
 
 #include "Thread.h"
+#include "GameForms.h"
+#include "PostSceneGuard.h"
+
+#include <intrin.h>
 
 namespace Thread::Hooks
 {
@@ -24,9 +28,37 @@ namespace Thread::Hooks
                 const auto frameDelta = *deltaTime;
                 Instance::UpdateAnimations(frameDelta);
                 original();
-                if (!Util::IsGamePausedOrFrozen()) {
+                const bool paused = Util::IsGamePausedOrFrozen();
+                if (!paused) {
                     Thread::Interaction::NiSurface::Manager::OnFrameUpdate(frameDelta);
                 }
+                PostSceneGuard::Update(paused ? 0.0f : frameDelta, IsWeaponDrawBlocked());
+            }
+
+            static inline REL::Relocation<decltype(Thunk)> original;
+        };
+
+        // TESNPC::Activate is the base-object activation path used for mounting a horse.
+        // Check the target reference, since NPC base records can have multiple instances.
+        struct SceneHorseActivationHook
+        {
+            static void Install()
+            {
+                REL::Relocation<std::uintptr_t> vtable{ RE::VTABLE_TESNPC[0] };
+                original = vtable.write_vfunc(0x37, Thunk);
+                logger::info("Installed scene horse activation guard");
+            }
+
+            static bool Thunk(RE::TESNPC* a_base, RE::TESObjectREFR* a_targetRef,
+                RE::TESObjectREFR* a_activatorRef, std::uint8_t a_arg3,
+                RE::TESBoundObject* a_object, std::int32_t a_targetCount)
+            {
+                const auto actor = a_targetRef ? a_targetRef->As<RE::Actor>() : nullptr;
+                if (actor && actor->IsHorse() && GameForms::AnimatingFaction &&
+                    actor->IsInFaction(GameForms::AnimatingFaction)) {
+                    return false;
+                }
+                return original(a_base, a_targetRef, a_activatorRef, a_arg3, a_object, a_targetCount);
             }
 
             static inline REL::Relocation<decltype(Thunk)> original;
@@ -46,7 +78,9 @@ namespace Thread::Hooks
 			// This is called when either a mod, or the player tries to unsheathe their weapon
             static void Thunk(RE::PlayerCharacter* a_player, bool a_draw)
             {
-                if (!a_draw || !blockDraw.load(std::memory_order_relaxed)) {
+                const bool blocked = a_draw && blockDraw.load(std::memory_order_relaxed);
+                PostSceneGuard::OnDrawRequest(a_draw, blocked, _ReturnAddress());
+                if (!blocked) {
                     original(a_player, a_draw);
                 }
             }
@@ -60,10 +94,16 @@ namespace Thread::Hooks
     {
         FrameUpdateHook::Install();
         DrawWeaponHook::Install();
+        SceneHorseActivationHook::Install();
     }
 
     void SetWeaponDrawBlocked(bool a_blocked) noexcept
     {
         DrawWeaponHook::blockDraw.store(a_blocked, std::memory_order_relaxed);
+    }
+
+    bool IsWeaponDrawBlocked() noexcept
+    {
+        return DrawWeaponHook::blockDraw.load(std::memory_order_relaxed);
     }
 }

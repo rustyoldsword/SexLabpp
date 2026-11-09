@@ -1,5 +1,7 @@
 #pragma once
 
+#include "AdultHeightPolicy.h"
+
 #include "Registry/Library.h"
 #include "Thread/Interaction/NiSurface/CollisionManager.h"
 
@@ -10,15 +12,7 @@ namespace Thread
         constexpr static const char* CENTER_REF_NAME{ "CenterAlias" };
 
       public:
-        enum class SceneProfile
-        {
-            Normal,
-            PetiteFemale,
-            PetiteMaleSMF,
-            PetiteMaleMSMF,
-            PetiteMaleSMSMF,
-            PetiteMaleSMFF,
-        };
+        using SceneProfile = AdultHeight::Profile;
 
         enum class FurniturePreference
         {
@@ -78,6 +72,11 @@ namespace Thread
         static void FinalizeCenterRefSelection(RE::TESQuest* a_linkedQst);
         static void DispatchContinueSetup(RE::TESQuest* a_linkedQst, bool a_result);
         static void UpdateAnimations(float a_delta);
+        static void RestoreActorsAfterLoad();
+        // For an actor RestoreActorsAfterLoad locked again, once: clears its saved controller flags and moves it off the
+        // scene position
+        static void ReleaseActorAfterLoad(RE::Actor* a_actor);
+        static void ClearActorsAfterLoad();
 
       public:
         bool HasInstanceNiSurface() const { return GetInstanceNiSurface() != nullptr; }
@@ -195,6 +194,7 @@ namespace Thread
         };
 
         RE::TESQuest* linkedQst;
+        const bool petiteProfilesEnabled;
 
         Center center;
         std::vector<Position> positions;
@@ -235,6 +235,8 @@ namespace Thread
         SceneProfile GetSceneProfile() const;
         bool IsCompatibleSceneProfile(const Registry::Scene* a_scene, SceneProfile a_profile) const;
         bool ShouldPreserveActorScale(RE::Actor* a_actor) const;
+        bool HasOnlyHumanActors() const;
+        std::vector<std::vector<RE::Actor*>> GetCompatibleAssignments(const Registry::Scene* a_scene) const;
         RE::Actor* InitializeReferences(const std::vector<RE::Actor*>& a_submissives);
         std::vector<Registry::ActorFragment> InitializeScenes(const SceneMapping& a_scenes, FurniturePreference a_furniturePreference);
         std::vector<const Registry::Scene*>& InitializeCenter(RE::Actor* centerAct, FurniturePreference furniturePreference);

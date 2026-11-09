@@ -34,6 +34,9 @@ namespace Registry
         bool WearsHighHeels(RE::Actor* a_actor);
         void CleanupStaleHeels();
 
+        // Let SKEE rebuild the "NPC" node from the skeleton and the overrides it holds
+        void RefreshBaseNode(RE::Actor* a_actor);
+
       private:
         struct HeelState
         {

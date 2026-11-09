@@ -46,6 +46,12 @@ namespace Registry
             if (!a_actor->IsHumanoid()) {
                 return Settings::bCreatureGender ? Sex::Female : Sex::Male;
             }
+            if (Settings::bPatchTNGGender) {
+                const auto keyword = RE::TESForm::LookupByEditorID<RE::BGSKeyword>("TNG_Gentlewoman");
+                if (keyword && a_actor->HasKeyword(keyword)) {
+                    return Settings::bTNGFutaAsMale ? Sex::Male : Sex::Futa;
+                }
+            }
             return IsFuta(a_actor) ? Sex::Futa : Sex::Female;
         }
     }

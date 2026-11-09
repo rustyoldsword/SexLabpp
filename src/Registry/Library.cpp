@@ -1,6 +1,7 @@
 #include "Library.h"
 
 #include "Define/RaceKey.h"
+#include "Util/Scale.h"
 
 namespace Registry
 {
@@ -177,10 +178,20 @@ namespace Registry
 
     const Voice* Library::GetVoice(RE::Actor* a_actor, const TagDetails& a_tags)
     {
-        std::shared_lock lock{ _mVoice };
-        if (auto saved = GetSavedVoice(a_actor->GetFormID())) {
-            if (!Settings::bPatchPetite || a_tags.MatchTags(saved->tags)) {
+        if (!a_actor) return nullptr;
+        const auto base = a_actor->GetActorBase();
+        const auto sex = base ? base->GetSex() : RE::SEXES::kMale;
+        // Selection updates savedVoices: use one exclusive lock, without recursively locking GetSavedVoice.
+        std::unique_lock lock{ _mVoice };
+        if (const auto where = savedVoices.find(a_actor->GetFormID()); where != savedVoices.end()) {
+            const auto* saved = where->second;
+            const bool correctSex = !Settings::bPatchVoiceSexSync || saved->sex == RE::SEXES::kNone || saved->sex == sex;
+            if (correctSex && (!Settings::bPatchPetite || a_tags.MatchTags(saved->tags))) {
                 return saved;
+            }
+            if (!correctSex) {
+                logger::info("Native voice sex sync: discarded incompatible cached voice for actor {:X}.", a_actor->GetFormID());
+                savedVoices.erase(where);
             }
         }
         const RaceKey actRace{ a_actor };
@@ -188,8 +199,6 @@ namespace Registry
             logger::error("GetVoice: Actor {} has invalid racekey", a_actor->GetFormID());
             return nullptr;
         }
-        const auto base = a_actor->GetActorBase();
-        const auto sex = base ? base->GetSex() : RE::SEXES::kMale;
         std::vector<const Voice*> ret{};
         for (auto&& [name, voice] : voices) {
             if (!voice.enabled || voice.sex != RE::SEXES::kNone && voice.sex != sex)
@@ -200,11 +209,18 @@ namespace Registry
         }
         if (ret.empty())
             return nullptr;
-        if (auto voiceForm = base->GetVoiceType()) {
+        if (Settings::bPatchVoiceSexSync && a_actor->IsPlayerRef()) {
+            const auto wanted = voices.find(sex == RE::SEXES::kFemale ? "FemaleClassic" : "MaleNeutral");
+            if (wanted != voices.end() && std::ranges::contains(ret, &wanted->second)) {
+                logger::info("Native player voice sync: selected {} for body sex {}.", wanted->first, static_cast<int>(sex));
+                return savedVoices[a_actor->formID] = &wanted->second;
+            }
+        }
+        if (auto voiceForm = base ? base->GetVoiceType() : nullptr) {
             auto where = savedPitches.find(voiceForm->formID);
             if (where != savedPitches.end()) {
                 const auto [pitch, voice] = where->second;
-                if (voice != nullptr)
+                if (voice != nullptr && (!Settings::bPatchVoiceSexSync || std::ranges::contains(ret, voice)))
                     return voice;
                 const auto w = std::remove_if(ret.begin(), ret.end(), [&](const auto& v) {
                     return v->pitch != Pitch::Unknown && v->pitch != pitch;
@@ -215,6 +231,16 @@ namespace Registry
             }
         }
         return savedVoices[a_actor->formID] = Random::draw(ret);
+    }
+
+    void Library::SynchronizePlayerVoice()
+    {
+        if (!Settings::bPatchVoiceSexSync) return;
+        auto* player = RE::PlayerCharacter::GetSingleton();
+        if (!player || !player->Get3D() || !player->GetActorBase()) return;
+        const bool petite = Settings::bPatchPetite && RaceKey{ player }.Is(RaceKey::Human) &&
+            Scale::GetSingleton()->GetScale(player) <= Settings::fPetiteAdultScale;
+        GetVoice(player, Settings::bPatchPetite ? TagDetails{ petite ? "Petite"sv : "-Petite"sv } : TagDetails{ ""sv });
     }
 
     const Voice* Library::GetVoice(const TagDetails& tags) const
