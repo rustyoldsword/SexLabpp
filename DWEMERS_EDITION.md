@@ -1,4 +1,4 @@
-# SexLab P++ Dwemer's Edition 2.19.4 (for SexLab P+ 2.19.0)
+# SexLab P++ Dwemer's Edition 2.19.5 (for SexLab P+ 2.19.0)
 
 A patch package for **SexLab P+ 2.19.0**. Each patch can be switched off in the SexLab MCM; with every switch off,
 SexLab P+ runs its own stock code.
@@ -7,7 +7,7 @@ SexLab P+ runs its own stock code.
 | Switch | What it does |
 |---|---|
 | Petite Profiles | Short adult actors take part in scenes and get scenes and roles made for their height. Normal-height actors never take a short role |
-| Heels Compensation | An actor standing on the feet keeps the heels and is scaled to the animation; everyone else has the heel lift removed |
+| Heels Compensation | An actor standing on the feet keeps the heels: the body is scaled down a little (not below 0.95) and the thighs are shortened for the rest, so the pelvis lands where the animation expects. Everyone else has the heel lift removed |
 | Clothing tab | Clothing tab in the scene HUD, with strip/redress rules per clothing group |
 | Devious Devices scene filter | Scenes are chosen by the devices each actor wears, using DD's own rules |
 | Enjoyment fix | Keeps the fraction of every enjoyment tick, so actors with a small gain no longer get stuck below orgasm |
@@ -29,6 +29,23 @@ Requirements: SKSE, SexLab P+ 2.19.0, SKSE Menu Framework (scene HUD), RaceMenu 
 Optional: Devious Devices NG (scene filter).
 
 ## Changelog
+### 2.19.5
+Petite:
+- A short adult is now recognised by her height relative to her race, not by the rendered scale. A 0.8 NPC of a race
+  that is 1.03 tall renders at 0.824 and used to count as normal height, so she got normal scenes and was stretched.
+  `fPetiteAdultScale` in `SexLab.ini` is now 0.85 (was 0.8).
+- One petite woman + one normal-height woman: scenes tagged `Petite` with two female roles that do not say which role is
+  the petite one were all refused, so this pair had no scenes at all. Either woman may now take either role, and the
+  petite one keeps her height. All other combinations keep the existing rules.
+
+Heels Compensation:
+- Standing on heels: the body is scaled down only to 0.95 at most and the thighs are shortened for the rest (feet keep
+  their size), instead of shrinking the whole actor. If the thigh scale does not hold in an animation, that actor falls
+  back to the old body-only fit. New `SexLab.ini` keys in `[Heels]`: `bHeelLegShortening`, `fHeelBodyMinFactor`,
+  `fHeelMinLegScale`.
+- An actor only slightly taller than the animation (for example 1.03) is now scaled to it; before, anything within 0.03
+  was left as is.
+
 ### 2.19.4
 New:
 - TNG gender: female-bodied actors with a TNG schlong get male roles by default; an MCM switch lets them play futa

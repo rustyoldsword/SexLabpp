@@ -239,7 +239,7 @@ namespace Registry
         auto* player = RE::PlayerCharacter::GetSingleton();
         if (!player || !player->Get3D() || !player->GetActorBase()) return;
         const bool petite = Settings::bPatchPetite && RaceKey{ player }.Is(RaceKey::Human) &&
-            Scale::GetSingleton()->GetScale(player) <= Settings::fPetiteAdultScale;
+            Scale::GetSingleton()->GetRaceRelativeHeight(player) <= Settings::fPetiteAdultScale;
         GetVoice(player, Settings::bPatchPetite ? TagDetails{ petite ? "Petite"sv : "-Petite"sv } : TagDetails{ ""sv });
     }
 

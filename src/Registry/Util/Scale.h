@@ -22,6 +22,8 @@ namespace Registry
 
       public:
         float GetScale(RE::TESObjectREFR* a_reference);
+        // GetScale divided by the race height for the actor's sex (petite checks)
+        float GetRaceRelativeHeight(RE::Actor* a_actor);
         void SetScale(RE::Actor* a_reference, float a_absolutescale);
         void SetScale(RE::Actor* a_reference, RaceKey a_racekey, float a_absolutescale);
         void RemoveScale(RE::Actor* a_reference);
@@ -52,6 +54,11 @@ namespace Registry
             uint32_t samples{ 0 };
             uint32_t standingSamples{ 0 };
             std::vector<float> anchors{};
+            float legDrop{ 0.0f };                  // hip-to-foot drop of the supporting leg at full length, skeleton units
+            float legScale{ 1.0f };                 // thigh scale currently applied (feet get the inverse)
+            float expectedThighScale{ 0.0f };       // thigh local scale right after we set it, to see whether it holds
+            std::vector<float> legDrops{};
+            bool legsFailed{ false };               // the leg scale did not hold on this actor: body-only fit
             bool sampling{ false };
             bool applied{ false };
             bool standingKnown{ false };
@@ -64,6 +71,8 @@ namespace Registry
         void ApplyTransform(RE::Actor* a_actor, HeelState& a_state);
         void SampleStance(RE::Actor* a_actor, RE::NiAVObject* a_npc, HeelState& a_state);
         void DecideStance(RE::Actor* a_actor, HeelState& a_state);
+        void SetLegScale(RE::Actor* a_actor, bool a_female, HeelState& a_state, float a_legScale);
+        bool RemoveLegScale(RE::Actor* a_actor, bool a_female);
 
         struct ScaleNodeVisitor : public SKEE::INiTransformInterface::NodeVisitor
         {

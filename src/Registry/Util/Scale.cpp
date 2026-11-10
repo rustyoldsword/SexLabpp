@@ -1,5 +1,8 @@
 #include "Scale.h"
 
+#include "HeelMath.h"
+#include "Thread/AdultHeightPolicy.h"
+
 namespace Registry
 {
     namespace
@@ -8,7 +11,10 @@ namespace Registry
         constexpr const char* pelvisNode{ "NPC Pelvis [Pelv]" };
         constexpr std::array footNodes{ "NPC L Foot [Lft ]", "NPC R Foot [Rft ]" };
         constexpr std::array kneeNodes{ "NPC L Calf [LClf]", "NPC R Calf [RClf]" };
-        constexpr float scaleTolerance{ 0.03f };
+        constexpr std::array thighNodes{ "NPC L Thigh [LThg]", "NPC R Thigh [RThg]" };
+        // Stock 0.03 skipped a 1.03 actor (1.03f - 1.0f is just below 0.03f) and left them taller than the animation
+        constexpr float scaleTolerance{ 0.005f };
+        constexpr float legScaleHold{ 0.01f };
         constexpr float driftTranslation{ 0.05f };
         constexpr float driftScale{ 0.001f };
         constexpr float reapplyCooldown{ 0.5f };
@@ -40,6 +46,17 @@ namespace Registry
         const auto retVal = baseScale * nodeScale;
         logger::info("GetScale: {:X} -> Base = {}, Skeleton = {} => {}", a_reference->GetFormID(), baseScale, nodeScale, retVal);
         return retVal;
+    }
+
+    float Scale::GetRaceRelativeHeight(RE::Actor* a_actor)
+    {
+        assert(a_actor);
+        const auto scale = GetScale(a_actor);
+        const auto race = a_actor->GetRace();
+        const float raceHeight = race ? race->data.height[IsFemale(a_actor) ? RE::SEXES::kFemale : RE::SEXES::kMale] : 1.0f;
+        const auto ret = Thread::AdultHeight::RaceRelativeHeight(scale, raceHeight);
+        logger::info("Race relative height: {:X} -> {} / race {} => {}", a_actor->GetFormID(), scale, raceHeight, ret);
+        return ret;
     }
 
     void Scale::SetScale(RE::Actor* a_actor, float a_absolutescale)
@@ -110,6 +127,7 @@ namespace Registry
             state.samples = 0;
             state.standingSamples = 0;
             state.anchors.clear();
+            state.legDrops.clear();
             ApplyTransform(a_actor, state);
             return;
         }
@@ -170,6 +188,7 @@ namespace Registry
                 logger::info("Removed Transform Scale from {:X}", a_actor->GetFormID());
                 modernInterface->UpdateNodeTransforms(a_actor, false, female, basenode);
             }
+            RemoveLegScale(a_actor, female);
             return;
         }
         if (Settings::bDisableScale) {
@@ -201,6 +220,7 @@ namespace Registry
                 logger::info("Heels {:X}: compensation switched off, heel translation removed", a_actor->GetFormID());
                 modernInterface->UpdateNodeTransforms(a_actor, false, female, basenode);
             }
+            RemoveLegScale(a_actor, female);
         }
     }
 
@@ -366,6 +386,7 @@ namespace Registry
         state.samples = 0;
         state.standingSamples = 0;
         state.anchors.clear();
+        state.legDrops.clear();
         ApplyTransform(a_actor, state);
     }
 
@@ -410,6 +431,7 @@ namespace Registry
             }
             modernInterface->RemoveNodeTransformPosition(a_actor, false, female, basenode, namekey);
             modernInterface->AddNodeTransformScale(a_actor, false, female, basenode, namekey, sceneMult);
+            SetLegScale(a_actor, female, a_state, 1.0f);
             a_state.applied = false;
             return;
         }
@@ -429,6 +451,7 @@ namespace Registry
             modernInterface->RemoveNodeTransformPosition(a_actor, false, female, basenode, namekey);
             modernInterface->AddNodeTransformScale(a_actor, false, female, basenode, namekey, sceneMult);
             modernInterface->UpdateNodeTransforms(a_actor, false, female, basenode);
+            SetLegScale(a_actor, female, a_state, 1.0f);
             a_state.expectedZ = npc->local.translate.z;
             a_state.expectedScale = npc->local.scale;
             a_state.applied = true;
@@ -436,15 +459,19 @@ namespace Registry
             return;
         }
 
-        // Standing: keep the heel and shrink so the pelvis ends where it would be on bare feet (OStim scaleHeight).
-        // (lift*s + pelvis*s) = pelvis  =>  s = pelvis / (pelvis + lift); the lift is scaled with the body so the soles stay on the floor.
-        float factor = 1.0f;
+        // Standing: keep the heel and put the pelvis where it would be on bare feet. The body is shrunk a little
+        // (OStim scaleHeight) and the thighs are scaled down for the rest, so the actor keeps most of their height.
+        // The animation places the pelvis, the legs hang from it: shorter legs lift the feet, so the lift drops to match.
+        // See HeelMath.h for the derivation; with the legs off this is s = pelvis / (pelvis + lift) as before.
+        auto fit = HeelMath::StandingFit{ 1.0f, 1.0f, heel };
         if (a_state.anchor > 0.0f) {
-            factor = std::clamp(a_state.anchor / (a_state.anchor + heel), ::Settings::fHeelMinFactor, 1.0f);
+            fit = HeelMath::SolveStanding(a_state.anchor, heel, a_state.legDrop, ::Settings::fHeelMinFactor, ::Settings::fHeelBodyMinFactor,
+                ::Settings::fHeelMinLegScale, ::Settings::bHeelLegShortening && !a_state.legsFailed);
         }
         const float weight = std::clamp(a_state.weight, 0.0f, 1.0f);
-        const float finalScale = sceneScale * (1.0f - weight + weight * factor);
-        const float targetZ = weight * heel * finalScale;
+        const float finalScale = sceneScale * (1.0f - weight + weight * fit.body);
+        const float targetZ = weight * fit.lift * finalScale;
+        SetLegScale(a_actor, female, a_state, 1.0f - weight * (1.0f - fit.legScale));
         modernInterface->AddNodeTransformScale(a_actor, false, female, basenode, namekey, finalScale / preScale);
         modernInterface->UpdateNodeTransforms(a_actor, false, female, basenode);
         const float zeroZ = npc->local.translate.z;
@@ -463,9 +490,10 @@ namespace Registry
         a_state.expectedScale = npc->local.scale;
         a_state.applied = true;
         if (weight == 0.0f || weight == 1.0f) {
-            logger::info("Heels {:X}: lift {:.2f}, {}, anchor {:.1f}, scene scale {:.3f} -> {:.3f}, NPC z {:.2f} -> {:.2f} (key z {:.2f})",
+            logger::info("Heels {:X}: lift {:.2f}, {}, anchor {:.1f}, scene scale {:.3f} -> {:.3f}, NPC z {:.2f} -> {:.2f} (key z {:.2f}), body {:.3f}, legs -{:.2f} (thigh x{:.3f}, leg drop {:.1f})",
                 a_actor->GetFormID(), heel, weight == 1.0f ? "standing on heels" : "lift cancelled", a_state.anchor,
-                baseScale * sceneMult, a_actor->GetScale() * npc->local.scale, preZ, npc->local.translate.z, position.z);
+                baseScale * sceneMult, a_actor->GetScale() * npc->local.scale, preZ, npc->local.translate.z, position.z,
+                weight * fit.body + (1.0f - weight), weight * (heel - fit.lift), a_state.legScale, a_state.legDrop);
         }
     }
 
@@ -491,7 +519,64 @@ namespace Registry
         if (standing) {
             a_state.standingSamples++;
             a_state.anchors.push_back(*pelvis);
+            // Supporting leg = the lower foot. The thigh scale shrinks everything below the hip joint by the same
+            // factor, so the drop measured now is divided by the scale applied to get the full-length drop.
+            const size_t side = *leftFoot <= *rightFoot ? 0 : 1;
+            const auto hip = SkeletonHeight(a_actor, inverse, thighNodes[side]);
+            const float drop = hip ? (*hip - (side == 0 ? *leftFoot : *rightFoot)) / std::max(a_state.legScale, 0.1f) : 0.0f;
+            if (std::isfinite(drop) && drop > 0.0f) {
+                a_state.legDrops.push_back(drop);
+            }
         }
+    }
+
+    void Scale::SetLegScale(RE::Actor* a_actor, bool a_female, HeelState& a_state, float a_legScale)
+    {
+        const auto modernInterface = GetModernInterface();
+        if (!modernInterface) {
+            return;
+        }
+        if (a_legScale >= 0.999f || !std::isfinite(a_legScale)) {
+            if (a_state.legScale != 1.0f) {
+                RemoveLegScale(a_actor, a_female);
+            }
+            a_state.legScale = 1.0f;
+            a_state.expectedThighScale = 0.0f;
+            return;
+        }
+        if (std::abs(a_legScale - a_state.legScale) < 0.0005f && a_state.expectedThighScale > 0.0f) {
+            return;
+        }
+        // Thighs shorter, feet back to full size so the shoes and the heel keep their shape
+        for (size_t i = 0; i < thighNodes.size(); i++) {
+            modernInterface->AddNodeTransformScaleMode(a_actor, false, a_female, thighNodes[i], namekey, ScaleModes::Multiplicative);
+            modernInterface->AddNodeTransformScale(a_actor, false, a_female, thighNodes[i], namekey, a_legScale);
+            modernInterface->UpdateNodeTransforms(a_actor, false, a_female, thighNodes[i]);
+            modernInterface->AddNodeTransformScaleMode(a_actor, false, a_female, footNodes[i], namekey, ScaleModes::Multiplicative);
+            modernInterface->AddNodeTransformScale(a_actor, false, a_female, footNodes[i], namekey, 1.0f / a_legScale);
+            modernInterface->UpdateNodeTransforms(a_actor, false, a_female, footNodes[i]);
+        }
+        a_state.legScale = a_legScale;
+        const auto thigh = a_actor->GetNodeByName(thighNodes[0]);
+        a_state.expectedThighScale = thigh ? thigh->local.scale : 0.0f;
+    }
+
+    bool Scale::RemoveLegScale(RE::Actor* a_actor, bool a_female)
+    {
+        const auto modernInterface = GetModernInterface();
+        if (!modernInterface) {
+            return false;
+        }
+        bool removed = false;
+        for (const auto* nodes : { &thighNodes, &footNodes }) {
+            for (const auto* node : *nodes) {
+                if (modernInterface->RemoveNodeTransform(a_actor, false, a_female, node, namekey)) {
+                    modernInterface->UpdateNodeTransforms(a_actor, false, a_female, node);
+                    removed = true;
+                }
+            }
+        }
+        return removed;
     }
 
     void Scale::DecideStance(RE::Actor* a_actor, HeelState& a_state)
@@ -512,6 +597,15 @@ namespace Registry
         if (standing && std::abs(anchor - a_state.anchor) > 0.5f) {
             a_state.anchor = anchor;
             a_state.applied = false;
+        }
+        if (standing && !a_state.legDrops.empty()) {
+            auto& drops = a_state.legDrops;
+            std::ranges::nth_element(drops, drops.begin() + drops.size() / 2);
+            const float drop = drops[drops.size() / 2];
+            if (std::abs(drop - a_state.legDrop) > 0.5f) {
+                a_state.legDrop = drop;
+                a_state.applied = false;
+            }
         }
         a_state.targetWeight = standing ? 1.0f : 0.0f;
     }
@@ -559,6 +653,16 @@ namespace Registry
                 a_actor->GetFormID(), npc->local.translate.z, state.expectedZ, npc->local.scale, state.expectedScale);
             dirty = true;
         }
+        // The animation must not undo the thigh scale; if it does, this actor falls back to the body-only fit
+        if (!dirty && state.cooldown <= 0.0f && state.legScale < 1.0f && state.expectedThighScale > 0.0f) {
+            const auto thigh = a_actor->GetNodeByName(thighNodes[0]);
+            if (thigh && std::abs(thigh->local.scale - state.expectedThighScale) > legScaleHold) {
+                logger::warn("Heels {:X}: leg shortening did not hold (thigh scale {:.3f} / {:.3f}), body-only fit from now on",
+                    a_actor->GetFormID(), thigh->local.scale, state.expectedThighScale);
+                state.legsFailed = true;
+                dirty = true;
+            }
+        }
         if (dirty) {
             ApplyTransform(a_actor, state);
         }
@@ -590,6 +694,9 @@ namespace Registry
             if (modernInterface->RemoveNodeTransformPosition(actor, false, female, basenode, namekey)) {
                 logger::info("Heels {:X}: removed heel compensation left over from an unfinished scene", actor->GetFormID());
                 modernInterface->UpdateNodeTransforms(actor, false, female, basenode);
+            }
+            if (RemoveLegScale(actor, female)) {
+                logger::info("Heels {:X}: removed leg shortening left over from an unfinished scene", actor->GetFormID());
             }
         }
     }

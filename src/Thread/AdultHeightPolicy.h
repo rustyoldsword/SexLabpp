@@ -36,6 +36,13 @@ namespace Thread::AdultHeight
         bool normalAnnotation;
     };
 
+    // Petite is judged on the actor's own height relative to their race (NPC height x reference scale), not on the
+    // rendered scale: a 0.8 NPC of a 1.03 race renders at 0.824 and must still count as petite.
+    inline float RaceRelativeHeight(float a_scale, float a_raceHeight)
+    {
+        return std::isfinite(a_raceHeight) && a_raceHeight > 0.0f ? a_scale / a_raceHeight : a_scale;
+    }
+
     inline Profile Classify(std::span<const Participant> a_actors, float a_threshold)
     {
         if (!std::isfinite(a_threshold) || a_threshold <= 0.0f) return Profile::MetadataRequired;
@@ -113,6 +120,20 @@ namespace Thread::AdultHeight
         return *profile == Profile::Normal && a_actorProfile != Profile::Normal &&
             std::ranges::any_of(a_roles, [](bool p) { return p; }) &&
             std::ranges::any_of(a_roles, [](bool p) { return !p; });
+    }
+
+    // Owner exception (2026-11-11): a "Petite"-tagged scene with two strictly female roles and no per-role height
+    // metadata does not say which woman is the petite one (the legacy rule marks both). For one petite and one
+    // normal-height woman either woman may take either role; every other composition keeps the rules above.
+    inline bool IsUnmarkedPetiteFemalePair(Profile a_actorProfile, size_t a_actorCount, std::span<const Role> a_roles,
+        unsigned a_mask, float a_threshold)
+    {
+        return a_actorProfile == Profile::PetiteFemale && a_actorCount == 2 && a_roles.size() == 2 &&
+            DecodeProfile(a_mask) == Profile::PetiteFemale && std::isfinite(a_threshold) &&
+            std::ranges::all_of(a_roles, [a_threshold](const auto& role) {
+                return role.female && !role.male && !role.petiteAnnotation && !role.normalAnnotation &&
+                    std::isfinite(role.scale) && role.scale > a_threshold;
+            });
     }
 
     inline bool MatchesAssignment(const std::vector<bool>& a_actors, const std::vector<bool>& a_roles)

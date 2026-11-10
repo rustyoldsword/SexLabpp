@@ -49,6 +49,7 @@ namespace Registry
 
         _NODISCARD RE::Actor* GetActor() const { return actor; }
         _NODISCARD float GetScale() const { return scale; }
+        _NODISCARD float GetRaceRelativeHeight() const { return height; }
         _NODISCARD RaceKey GetRace() const;
         _NODISCARD REX::EnumSet<Sex> GetSex() const;
 
@@ -91,6 +92,7 @@ namespace Registry
         RE::Actor* actor{ nullptr };
         REX::EnumSet<Value> value{ Value::None };
         float scale{ 1.0f };
+        float height{ 1.0f };  // scale relative to the race height, for petite checks
     };
 
 }  // namespace Registry

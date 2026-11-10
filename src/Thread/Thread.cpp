@@ -170,8 +170,8 @@ namespace Thread
             for (size_t i = 0; i < activeAssignment->size(); ++i) {
                 auto* actor = activeAssignment->at(i);
                 const auto p = std::ranges::find_if(positions, [actor](const auto& it) { return it.data.GetActor() == actor; });
-                logger::info("Adult height assignment: scene={}, slot={}, actor={:X}, captured scale={}, animation scale={}",
-                    a_scene->id, i + 1, actor->GetFormID(), p->data.GetScale(), a_scene->GetNthPosition(i)->data.GetScale());
+                logger::info("Adult height assignment: scene={}, slot={}, actor={:X}, captured scale={}, race-relative height={}, animation scale={}",
+                    a_scene->id, i + 1, actor->GetFormID(), p->data.GetScale(), p->data.GetRaceRelativeHeight(), a_scene->GetNthPosition(i)->data.GetScale());
             }
         }
 

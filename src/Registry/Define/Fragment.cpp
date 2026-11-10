@@ -8,7 +8,7 @@ namespace Registry
     ActorFragment::Value RaceKeyToValue(RaceKey a) { return ActorFragment::Value(static_cast<ActorFragment::ValueType>(a.value) << 3); }
 
     ActorFragment::ActorFragment(REX::EnumSet<Sex> a_sex, RaceKey a_race, float a_scale, bool a_vampire, bool a_submissive, bool a_unconscious) :
-      actor(nullptr), value(Value::None), scale(a_scale)
+      actor(nullptr), value(Value::None), scale(a_scale), height(a_scale)
     {
         if (a_sex.all(Sex::Male))
             value.set(Male);
@@ -38,7 +38,8 @@ namespace Registry
     }
 
     ActorFragment::ActorFragment(RE::Actor* a_actor, bool a_submissive) :
-      actor(a_actor), value(Value::None), scale(Scale::GetSingleton()->GetScale(a_actor))
+      actor(a_actor), value(Value::None), scale(Scale::GetSingleton()->GetScale(a_actor)),
+      height(Scale::GetSingleton()->GetRaceRelativeHeight(a_actor))
     {
         const auto sex = Registry::GetSex(a_actor);
         switch (sex) {
