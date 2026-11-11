@@ -1,7 +1,9 @@
 #include "Scale.h"
 
 #include "HeelMath.h"
+#include "LegDebug.h"
 #include "Thread/AdultHeightPolicy.h"
+#include "Util/Script.h"
 
 namespace Registry
 {
@@ -12,6 +14,64 @@ namespace Registry
         constexpr std::array footNodes{ "NPC L Foot [Lft ]", "NPC R Foot [Rft ]" };
         constexpr std::array kneeNodes{ "NPC L Calf [LClf]", "NPC R Calf [RClf]" };
         constexpr std::array thighNodes{ "NPC L Thigh [LThg]", "NPC R Thigh [RThg]" };
+        constexpr const char* headNode{ "NPC Head [Head]" };
+        // XPMSSE nodes the animation never writes: "CME Thigh" carries the calf, "CME Calf" -> "CME Knee" carries the foot
+        constexpr std::array cmeThighNodes{ "CME L Thigh [LThg]", "CME R Thigh [RThg]" };
+        constexpr std::array cmeCalfNodes{ "CME L Calf [LClf]", "CME R Calf [RClf]" };
+        constexpr std::array cmeKneeNodes{ "CME L Knee [LKne]", "CME R Knee [RKne]" };
+
+        constexpr uint32_t Rgba(uint32_t r, uint32_t g, uint32_t b, uint32_t a) { return (a << 24) | (b << 16) | (g << 8) | r; }
+
+        // Corrective body morphs by knee flexion, through NiOverride's Papyrus API (independent of the SKEE build).
+        // UBE and 3BA sliders are written together: a body loads only the sliders its TRI has.
+        constexpr auto kneeMorphKey{ "SexLabKneeFix" };
+
+        template <class... Args>
+        void CallNiOverride(const char* a_function, Args... a_args)  // by value: the VM argument pack wants plain types
+        {
+            Script::CallbackPtr none{};
+            auto args = RE::MakeFunctionArguments(std::move(a_args)...);
+            if (!Script::DispatchStaticCall("NiOverride", a_function, none, args)) {
+                logger::warn("Knee morph: NiOverride.{} could not be called", a_function);
+            }
+        }
+
+        void SetKneeMorphs(RE::Actor* a_actor, float a_gain, float a_deep, const LegDebug::Params& a_params)
+        {
+            const std::array<std::pair<const char*, float>, 8> sliders{ {
+                { "CalfUpperSize p|n", a_params.ubeCalfUpper * a_gain + a_params.ubeDeepCalfUpper * a_deep },
+                { "LowerThighsSizeBig", a_params.ubeThighLower * a_gain },
+                { "ThighBackDepth", a_params.ubeThighBack * a_gain },
+                { "LowerOuterThighSize Bigger", a_params.ubeThighOuter * a_gain },
+                { "CalfSize", a_params.cbbeCalfSize * a_gain + a_params.cbbeDeepCalfSize * a_deep },
+                { "CalfSmooth", a_params.cbbeCalfSmooth * a_gain },
+                { "CalfFBThicc_v2", a_params.cbbeCalfDepth * a_gain },
+                { "ChubbyLegs", a_params.cbbeLegsFuller * a_gain },
+            } };
+            const auto refr = static_cast<RE::TESObjectREFR*>(a_actor);
+            for (const auto& [name, amount] : sliders) {
+                const float value = amount;
+                if (value != 0.0f) {
+                    CallNiOverride("SetBodyMorph", refr, RE::BSFixedString(name), RE::BSFixedString(kneeMorphKey), value);
+                } else {
+                    CallNiOverride("ClearBodyMorph", refr, RE::BSFixedString(name), RE::BSFixedString(kneeMorphKey));
+                }
+            }
+            CallNiOverride("UpdateModelWeight", refr);
+        }
+
+        void ClearKneeMorphs(RE::Actor* a_actor)
+        {
+            const auto refr = static_cast<RE::TESObjectREFR*>(a_actor);
+            CallNiOverride("ClearBodyMorphKeys", refr, RE::BSFixedString(kneeMorphKey));
+            CallNiOverride("UpdateModelWeight", refr);
+        }
+
+        float Median(std::vector<float>& a_values)
+        {
+            std::ranges::nth_element(a_values, a_values.begin() + a_values.size() / 2);
+            return a_values[a_values.size() / 2];
+        }
         // Stock 0.03 skipped a 1.03 actor (1.03f - 1.0f is just below 0.03f) and left them taller than the animation
         constexpr float scaleTolerance{ 0.005f };
         constexpr float legScaleHold{ 0.01f };
@@ -122,12 +182,7 @@ namespace Registry
             std::scoped_lock lock{ heelLock };
             auto& state = heelStates[a_actor->GetFormID()];
             state.absoluteScale = Settings::bDisableScale ? std::nullopt : std::optional{ a_absolutescale };
-            state.sampling = true;
-            state.stageTime = 0.0f;
-            state.samples = 0;
-            state.standingSamples = 0;
-            state.anchors.clear();
-            state.legDrops.clear();
+            ResetSampling(state);
             ApplyTransform(a_actor, state);
             return;
         }
@@ -164,6 +219,21 @@ namespace Registry
     void Scale::RemoveScale(RE::Actor* a_actor)
     {
         assert(a_actor);
+        {
+            // Knee morphs go with the scene. Without a state (a save loaded mid-scene) they are cleared blindly.
+            bool morphed = LegDebug::Get().morph;
+            {
+                std::scoped_lock lock{ heelLock };
+                if (const auto where = heelStates.find(a_actor->GetFormID()); where != heelStates.end()) {
+                    morphed = where->second.kneeMorph.applied > 0.0f;
+                    where->second.kneeMorph = {};
+                }
+            }
+            if (morphed) {
+                ClearKneeMorphs(a_actor);
+                logger::info("Knee morph {:X}: cleared at scene end", a_actor->GetFormID());
+            }
+        }
         if (!::Settings::bPatchHeels) {
             DropHeelState(a_actor);
             RemoveScaleStock(a_actor);
@@ -181,7 +251,10 @@ namespace Registry
         if (const auto modernInterface = GetModernInterface()) {
             {
                 std::scoped_lock lock{ heelLock };
-                heelStates.erase(a_actor->GetFormID());
+                if (const auto where = heelStates.find(a_actor->GetFormID()); where != heelStates.end()) {
+                    RestoreLegs(where->second.legs);
+                    heelStates.erase(where);
+                }
             }
             // Heel compensation shares the key, so the whole key goes, not only its scale
             if (modernInterface->RemoveNodeTransform(a_actor, false, female, basenode, namekey)) {
@@ -210,9 +283,12 @@ namespace Registry
     {
         {
             std::scoped_lock lock{ heelLock };
-            if (heelStates.erase(a_actor->GetFormID()) == 0) {
+            const auto where = heelStates.find(a_actor->GetFormID());
+            if (where == heelStates.end()) {
                 return;
             }
+            RestoreLegs(where->second.legs);
+            heelStates.erase(where);
         }
         if (const auto modernInterface = GetModernInterface()) {
             const auto female = IsFemale(a_actor);
@@ -381,13 +457,35 @@ namespace Registry
         std::scoped_lock lock{ heelLock };
         auto& state = heelStates[a_actor->GetFormID()];
         state.absoluteScale = std::nullopt;
-        state.sampling = true;
-        state.stageTime = 0.0f;
-        state.samples = 0;
-        state.standingSamples = 0;
-        state.anchors.clear();
-        state.legDrops.clear();
+        ResetSampling(state);
         ApplyTransform(a_actor, state);
+    }
+
+    void Scale::ResetSampling(HeelState& a_state)
+    {
+        a_state.sampling = true;
+        a_state.stageTime = 0.0f;
+        a_state.samples = 0;
+        a_state.standingSamples = 0;
+        a_state.anchors.clear();
+        a_state.legDrops.clear();
+        a_state.heads.clear();
+        a_state.thighVerticals.clear();
+        a_state.shinVerticals.clear();
+    }
+
+    void Scale::SetStageFocus(RE::Actor* a_actor, float a_pelvisWeight, float a_headWeight)
+    {
+        if (!a_actor || !::Settings::bPatchHeels || !GetModernInterface()) {
+            return;
+        }
+        std::scoped_lock lock{ heelLock };
+        auto& state = heelStates[a_actor->GetFormID()];
+        if (state.pelvisWeight != a_pelvisWeight || state.headWeight != a_headWeight) {
+            state.pelvisWeight = a_pelvisWeight;
+            state.headWeight = a_headWeight;
+            state.applied = false;
+        }
     }
 
     bool Scale::WearsHighHeels(RE::Actor* a_actor)
@@ -432,6 +530,8 @@ namespace Registry
             modernInterface->RemoveNodeTransformPosition(a_actor, false, female, basenode, namekey);
             modernInterface->AddNodeTransformScale(a_actor, false, female, basenode, namekey, sceneMult);
             SetLegScale(a_actor, female, a_state, 1.0f);
+            a_state.kneeShift = 0.0f;
+            a_state.ankleShift = 0.0f;
             a_state.applied = false;
             return;
         }
@@ -452,6 +552,8 @@ namespace Registry
             modernInterface->AddNodeTransformScale(a_actor, false, female, basenode, namekey, sceneMult);
             modernInterface->UpdateNodeTransforms(a_actor, false, female, basenode);
             SetLegScale(a_actor, female, a_state, 1.0f);
+            a_state.kneeShift = 0.0f;
+            a_state.ankleShift = 0.0f;
             a_state.expectedZ = npc->local.translate.z;
             a_state.expectedScale = npc->local.scale;
             a_state.applied = true;
@@ -459,19 +561,40 @@ namespace Registry
             return;
         }
 
-        // Standing: keep the heel and put the pelvis where it would be on bare feet. The body is shrunk a little
-        // (OStim scaleHeight) and the thighs are scaled down for the rest, so the actor keeps most of their height.
-        // The animation places the pelvis, the legs hang from it: shorter legs lift the feet, so the lift drops to match.
-        // See HeelMath.h for the derivation; with the legs off this is s = pelvis / (pelvis + lift) as before.
-        auto fit = HeelMath::StandingFit{ 1.0f, 1.0f, heel };
+        // Standing: keep the heel, soles on the floor, and share the lift between a slightly smaller body, slightly
+        // slimmer legs and shorter thigh and shin joints, each in proportion to how little it shows (HeelMath.h).
+        // The stage focus decides whether the pelvis (sex) or the head (kissing) has to match the bare-foot animation.
+        HeelMath::StandingFit fit{};
+        fit.lift = heel;
         if (a_state.anchor > 0.0f) {
-            fit = HeelMath::SolveStanding(a_state.anchor, heel, a_state.legDrop, ::Settings::fHeelMinFactor, ::Settings::fHeelBodyMinFactor,
-                ::Settings::fHeelMinLegScale, ::Settings::bHeelLegShortening && !a_state.legsFailed);
+            HeelMath::StandingInput in;
+            in.heel = heel;
+            in.pelvis = { a_state.anchor, a_state.pelvisWeight };
+            in.head = { a_state.head, a_state.headWeight };
+            in.legDrop = a_state.legDrop;
+            in.thighVertical = a_state.thighVertical;
+            in.shinVertical = a_state.shinVertical;
+            in.tolBody = ::Settings::fHeelTolBody;
+            in.tolLegScale = ::Settings::fHeelTolLegScale;
+            in.tolKnee = ::Settings::fHeelTolKnee;
+            in.tolAnkle = ::Settings::fHeelTolAnkle;
+            in.tolAnchor = ::Settings::fHeelTolAnchor;
+            in.kneeBlend = ::Settings::fHeelKneeBlend;
+            in.ankleBlend = ::Settings::fHeelAnkleBlend;
+            in.bodyMin = ::Settings::fHeelMinFactor;
+            in.legScaleMin = ::Settings::fHeelMinLegScale;
+            in.kneeMax = ::Settings::fHeelMaxKneeShift;
+            in.ankleMax = ::Settings::fHeelMaxAnkleShift;
+            in.legScale = ::Settings::bHeelLegShortening && !a_state.legsFailed;
+            in.joints = ::Settings::bHeelLegJoints && !a_state.legs.failed;
+            fit = HeelMath::SolveStanding(in);
         }
         const float weight = std::clamp(a_state.weight, 0.0f, 1.0f);
         const float finalScale = sceneScale * (1.0f - weight + weight * fit.body);
         const float targetZ = weight * fit.lift * finalScale;
         SetLegScale(a_actor, female, a_state, 1.0f - weight * (1.0f - fit.legScale));
+        a_state.kneeShift = weight * fit.kneeShift;
+        a_state.ankleShift = weight * fit.ankleShift;
         modernInterface->AddNodeTransformScale(a_actor, false, female, basenode, namekey, finalScale / preScale);
         modernInterface->UpdateNodeTransforms(a_actor, false, female, basenode);
         const float zeroZ = npc->local.translate.z;
@@ -494,6 +617,11 @@ namespace Registry
                 a_actor->GetFormID(), heel, weight == 1.0f ? "standing on heels" : "lift cancelled", a_state.anchor,
                 baseScale * sceneMult, a_actor->GetScale() * npc->local.scale, preZ, npc->local.translate.z, position.z,
                 weight * fit.body + (1.0f - weight), weight * (heel - fit.lift), a_state.legScale, a_state.legDrop);
+            if (weight == 1.0f && a_state.anchor > 0.0f) {
+                logger::info("Heels {:X}: fit focus pelvis {:.2f} / head {:.2f}, knee shift {:.2f}, ankle shift {:.2f}, pelvis {:+.2f}, head {:+.2f} (head {:.1f}, legs vertical {:.2f}/{:.2f}{})",
+                    a_actor->GetFormID(), a_state.pelvisWeight, a_state.headWeight, fit.kneeShift, fit.ankleShift, fit.pelvisError, fit.headError,
+                    a_state.head, a_state.thighVertical, a_state.shinVertical, a_state.legs.failed ? ", no CME joints" : "");
+            }
         }
     }
 
@@ -516,17 +644,41 @@ namespace Registry
                               knee - foot >= ::Settings::fHeelKneeClearance &&
                               *pelvis - foot >= ::Settings::fHeelPelvisClearance;
         a_state.samples++;
-        if (standing) {
-            a_state.standingSamples++;
-            a_state.anchors.push_back(*pelvis);
-            // Supporting leg = the lower foot. The thigh scale shrinks everything below the hip joint by the same
-            // factor, so the drop measured now is divided by the scale applied to get the full-length drop.
-            const size_t side = *leftFoot <= *rightFoot ? 0 : 1;
-            const auto hip = SkeletonHeight(a_actor, inverse, thighNodes[side]);
-            const float drop = hip ? (*hip - (side == 0 ? *leftFoot : *rightFoot)) / std::max(a_state.legScale, 0.1f) : 0.0f;
-            if (std::isfinite(drop) && drop > 0.0f) {
-                a_state.legDrops.push_back(drop);
-            }
+        if (!standing) {
+            return;
+        }
+        a_state.standingSamples++;
+        a_state.anchors.push_back(*pelvis);
+        if (const auto head = SkeletonHeight(a_actor, inverse, headNode); head && *head > *pelvis) {
+            a_state.heads.push_back(*head);
+        }
+        // Supporting leg = the lower foot. Its full-length drop is what is measured now with our own changes
+        // taken back out: the thigh scale k shrinks everything below the hip, the joint shifts shorten the bones
+        // along their axes, so measured = k * drop - kneeShift * thighVertical - ankleShift * shinVertical.
+        const size_t side = *leftFoot <= *rightFoot ? 0 : 1;
+        const auto thighNode = a_actor->GetNodeByName(thighNodes[side]);
+        const auto calfNode = a_actor->GetNodeByName(kneeNodes[side]);
+        const auto footNode = a_actor->GetNodeByName(footNodes[side]);
+        if (!thighNode || !calfNode || !footNode) {
+            return;
+        }
+        const auto hip = inverse * thighNode->world.translate;
+        const auto kneeJoint = inverse * calfNode->world.translate;
+        const auto ankle = inverse * footNode->world.translate;
+        const auto vertical = [](const RE::NiPoint3& a_from, const RE::NiPoint3& a_to) {
+            const auto bone = a_to - a_from;
+            const float length = bone.Length();
+            return length > 1e-3f ? std::clamp((a_from.z - a_to.z) / length, 0.0f, 1.0f) : 1.0f;
+        };
+        const float thighVertical = vertical(hip, kneeJoint);
+        const float shinVertical = vertical(kneeJoint, ankle);
+        const auto& legSide = a_state.legs.sides[side];
+        const float shifts = a_state.legs.ready ? legSide.kneeApplied * thighVertical + legSide.ankleApplied * shinVertical : 0.0f;
+        const float drop = (hip.z - ankle.z + shifts) / std::max(a_state.legScale, 0.1f);
+        if (std::isfinite(drop) && drop > 0.0f) {
+            a_state.legDrops.push_back(drop);
+            a_state.thighVerticals.push_back(thighVertical);
+            a_state.shinVerticals.push_back(shinVertical);
         }
     }
 
@@ -585,9 +737,7 @@ namespace Registry
         float anchor = 0.0f;
         bool standing = false;
         if (::Settings::bHeelStandingScale && a_state.samples >= 3 && a_state.standingSamples * 10 >= a_state.samples * 7) {
-            auto& anchors = a_state.anchors;
-            std::ranges::nth_element(anchors, anchors.begin() + anchors.size() / 2);
-            anchor = anchors[anchors.size() / 2];
+            anchor = Median(a_state.anchors);
             standing = anchor >= ::Settings::fHeelMinAnchor;
         }
         if (a_state.heel > ::Settings::fHeelMinHeight) {
@@ -599,11 +749,21 @@ namespace Registry
             a_state.applied = false;
         }
         if (standing && !a_state.legDrops.empty()) {
-            auto& drops = a_state.legDrops;
-            std::ranges::nth_element(drops, drops.begin() + drops.size() / 2);
-            const float drop = drops[drops.size() / 2];
-            if (std::abs(drop - a_state.legDrop) > 0.5f) {
+            const float drop = Median(a_state.legDrops);
+            const float thighVertical = Median(a_state.thighVerticals);
+            const float shinVertical = Median(a_state.shinVerticals);
+            if (std::abs(drop - a_state.legDrop) > 0.5f || std::abs(thighVertical - a_state.thighVertical) > 0.02f ||
+                std::abs(shinVertical - a_state.shinVertical) > 0.02f) {
                 a_state.legDrop = drop;
+                a_state.thighVertical = thighVertical;
+                a_state.shinVertical = shinVertical;
+                a_state.applied = false;
+            }
+        }
+        if (standing && !a_state.heads.empty()) {
+            const float head = Median(a_state.heads);
+            if (std::abs(head - a_state.head) > 0.5f) {
+                a_state.head = head;
                 a_state.applied = false;
             }
         }
@@ -665,6 +825,249 @@ namespace Registry
         }
         if (dirty) {
             ApplyTransform(a_actor, state);
+        }
+        UpdateLegs(a_actor, state, a_delta);
+    }
+
+    bool Scale::CaptureLegs(RE::Actor* a_actor, LegRig& a_rig)
+    {
+        RestoreLegs(a_rig);
+        a_rig.root.reset(a_actor->Get3D(false));
+        for (size_t i = 0; i < a_rig.sides.size(); i++) {
+            auto& side = a_rig.sides[i];
+            const auto thigh = a_actor->GetNodeByName(thighNodes[i]);
+            const auto calf = a_actor->GetNodeByName(kneeNodes[i]);
+            const auto foot = a_actor->GetNodeByName(footNodes[i]);
+            const auto cmeThigh = a_actor->GetNodeByName(cmeThighNodes[i]);
+            const auto cmeCalf = a_actor->GetNodeByName(cmeCalfNodes[i]);
+            const auto cmeKnee = a_actor->GetNodeByName(cmeKneeNodes[i]);
+            if (!thigh || !calf || !foot || !cmeThigh || !cmeCalf || !cmeKnee || !cmeThigh->AsNode() ||
+                cmeThigh->parent != thigh->AsNode() || calf->parent != cmeThigh->AsNode() ||
+                cmeKnee->parent != cmeCalf->AsNode() || foot->parent != cmeKnee->AsNode()) {
+                a_rig.failed = true;
+                return false;
+            }
+            auto thighBone = calf->world.translate - thigh->world.translate;
+            auto shinBone = foot->world.translate - calf->world.translate;
+            const float thighLength = thighBone.Length();
+            const float shinLength = shinBone.Length();
+            if (!(thighLength > 1.0f) || !(shinLength > 1.0f)) {
+                return false;  // 3D not placed yet, try again next frame
+            }
+            side.thigh.reset(thigh);
+            side.calf.reset(calf);
+            side.cmeThigh.reset(cmeThigh);
+            side.cmeCalf.reset(cmeCalf);
+            // Bone directions are fixed in the parent's frame; kept there so our own shifts never feed back into them
+            side.thighAxis = thigh->world.rotate.Transpose() * (thighBone * (1.0f / thighLength));
+            side.shinAxis = calf->world.rotate.Transpose() * (shinBone * (1.0f / shinLength));
+            side.knee = LegJoint{ RE::NiPointer<RE::NiAVObject>(cmeThigh), cmeThigh->local.translate, cmeThigh->local.translate, 1.0f, false };
+            side.ankle = LegJoint{ RE::NiPointer<RE::NiAVObject>(cmeKnee), cmeKnee->local.translate, cmeKnee->local.translate, 1.0f, false };
+            side.helpers.clear();
+            for (const auto& child : cmeThigh->AsNode()->GetChildren()) {
+                if (!child || child.get() == calf) {
+                    continue;
+                }
+                // A flesh helper halfway down the thigh follows half of the knee shift: the thigh is compressed evenly
+                const float along = std::clamp((child->world.translate - thigh->world.translate).Dot(thighBone) / (thighLength * thighLength), 0.0f, 1.0f);
+                side.helpers.push_back(LegJoint{ child, child->local.translate, child->local.translate, along, false });
+            }
+            side.push = {};
+            side.kneeApplied = 0.0f;
+            side.ankleApplied = 0.0f;
+        }
+        a_rig.ready = true;
+        return true;
+    }
+
+    void Scale::RestoreLegs(LegRig& a_rig)
+    {
+        const auto restore = [](LegJoint& a_joint) {
+            // Only if the translation is still ours; a node someone else rewrote is left to them
+            if (a_joint.touched && a_joint.node && (a_joint.node->local.translate - a_joint.written).Length() < 1e-3f) {
+                a_joint.node->local.translate = a_joint.base;
+            }
+            a_joint.touched = false;
+        };
+        for (auto& side : a_rig.sides) {
+            restore(side.knee);
+            restore(side.ankle);
+            for (auto& helper : side.helpers) {
+                restore(helper);
+            }
+        }
+        const bool failed = a_rig.failed;
+        a_rig = {};
+        a_rig.failed = failed;
+    }
+
+    // Every frame of the scene: knee volume (all actors) and the joint shortening of a standing actor on heels.
+    // Offsets are built in world space and written into the parent's frame, so they are exact whatever the
+    // scene scale, the thigh scale or the pose.
+    void Scale::UpdateLegs(RE::Actor* a_actor, HeelState& a_state, float a_delta)
+    {
+        auto& rig = a_state.legs;
+        const auto knee = LegDebug::Get();
+        const bool wanted = knee.kneeFix || knee.draw || knee.morph || a_state.kneeShift > 0.0f || a_state.ankleShift > 0.0f;
+        if (!knee.morph && a_state.kneeMorph.applied > 0.0f) {
+            ClearKneeMorphs(a_actor);  // switched off live
+            a_state.kneeMorph = {};
+            logger::info("Knee morph {:X}: switched off, cleared", a_actor->GetFormID());
+        }
+        if (!wanted) {
+            if (rig.ready) {
+                RestoreLegs(rig);
+                LegDebug::Clear(a_actor->GetFormID());
+            }
+            return;
+        }
+        if (rig.failed) {
+            return;
+        }
+        const auto root = a_actor->Get3D(false);
+        if (!root) {
+            return;
+        }
+        if (!rig.ready || rig.root.get() != root) {
+            if (!CaptureLegs(a_actor, rig)) {
+                if (rig.failed) {
+                    logger::info("Legs {:X}: no XPMSSE CME leg joints, knee fix and joint shortening off for this actor", a_actor->GetFormID());
+                    a_state.applied = false;  // solve the heels again without the joints
+                }
+                return;
+            }
+            logger::info("Legs {:X}: CME leg joints found, thigh helpers {} / {}", a_actor->GetFormID(), rig.sides[0].helpers.size(), rig.sides[1].helpers.size());
+        }
+        const auto npc = a_actor->GetNodeByName(basenode);
+        if (!npc) {
+            return;
+        }
+        const float unit = npc->world.scale;
+        const auto up = npc->world.rotate * RE::NiPoint3{ 0.0f, 0.0f, 1.0f };
+        const auto inverse = npc->world.Invert();
+        const float alpha = a_delta > 0.0f ? 1.0f - std::exp(-a_delta / std::max(knee.smoothing, 1e-3f)) : 0.0f;
+        const bool dump = LegDebug::DumpDue(a_actor->GetFormID(), a_delta);
+        std::vector<LegDebug::Item> items{};
+
+        const auto write = [](LegJoint& a_joint, RE::NiAVObject* a_parent, const RE::NiPoint3& a_worldOffset) {
+            const auto node = a_joint.node.get();
+            if (!node || !a_parent) {
+                return;
+            }
+            if (a_joint.touched && (node->local.translate - a_joint.written).Length() > 1e-3f) {
+                a_joint.base = node->local.translate;  // rewritten by someone else (SKEE rebuild): that is the new base
+            }
+            if (!a_joint.touched && a_worldOffset.Length() < 1e-5f) {
+                return;
+            }
+            const float parentScale = a_parent->world.scale > 1e-6f ? a_parent->world.scale : 1.0f;
+            const auto value = a_joint.base + a_parent->world.rotate.Transpose() * (a_worldOffset * (1.0f / parentScale));
+            node->local.translate = value;
+            a_joint.written = value;
+            a_joint.touched = true;
+        };
+
+        float deepest = 0.0f;
+        for (size_t i = 0; i < rig.sides.size(); i++) {
+            auto& side = rig.sides[i];
+            const auto thighDir = side.thigh->world.rotate * side.thighAxis;
+            const auto shinDir = side.calf->world.rotate * side.shinAxis;
+            const auto hip = side.thigh->world.translate;
+            const auto kneeJoint = side.calf->world.translate;
+            const float kneeHeight = (inverse * kneeJoint).z;
+            const bool onFloor = kneeHeight < knee.floorHeight;
+            const float flexion = HeelMath::KneeFlexion({ thighDir.x, thighDir.y, thighDir.z }, { shinDir.x, shinDir.y, shinDir.z });
+            deepest = std::max(deepest, flexion * 57.29578f);
+            RE::NiPoint3 target{};
+            if (knee.kneeFix) {
+                const auto offset = HeelMath::KneeOffset({ thighDir.x, thighDir.y, thighDir.z }, { shinDir.x, shinDir.y, shinDir.z }, { up.x, up.y, up.z },
+                    knee.front, knee.along, knee.max, onFloor);
+                target = { offset.x, offset.y, offset.z };
+            }
+            side.push += (target - side.push) * alpha;
+
+            if (knee.draw || dump) {
+                // How the engine composes a child: compare the node it computed last frame with both conventions
+                const auto cme = side.cmeThigh.get();
+                const auto& parent = side.thigh->world;
+                const auto local = cme->local.translate * parent.scale;
+                const float errDirect = (cme->world.translate - (parent.translate + parent.rotate * local)).Length();
+                const float errTransposed = (cme->world.translate - (parent.translate + parent.rotate.Transpose() * local)).Length();
+                const auto applied = parent.rotate * ((side.knee.written - side.knee.base) * parent.scale);  // what we put in, world
+                const auto footNode = a_actor->GetNodeByName(footNodes[i]);
+                const auto ankle = footNode ? footNode->world.translate : kneeJoint + shinDir * (25.0f * unit);
+                auto front = thighDir - shinDir;
+                front.Unitize();
+                const char* name = i == 0 ? "L" : "R";
+                const auto text = std::format("{} {:.0f} deg h{:.1f}{} off {:+.2f}/{:+.2f}/{:+.2f} |{:.2f}| conv {:.2f}/{:.2f}", name,
+                    flexion * 57.29578f, kneeHeight, onFloor ? " floor" : "", side.push.x, side.push.y, side.push.z, side.push.Length(), errDirect, errTransposed);
+                if (knee.draw) {
+                    items.push_back({ hip, kneeJoint, Rgba(60, 230, 60, 255) });
+                    items.push_back({ kneeJoint, ankle, Rgba(80, 160, 255, 255) });
+                    items.push_back({ kneeJoint, kneeJoint + front * (4.0f * unit), Rgba(255, 255, 255, 200) });
+                    items.push_back({ kneeJoint, kneeJoint + side.push * (3.0f * unit), Rgba(255, 220, 0, 255) });
+                    items.push_back({ kneeJoint - applied, kneeJoint, Rgba(255, 60, 60, 255) });
+                    items.push_back({ kneeJoint, {}, Rgba(255, 255, 255, 255), text });
+                }
+                if (dump) {
+                    logger::info("Knee debug {:X} {}: flexion {:.1f}, knee height {:.1f}{}, target {:+.2f} {:+.2f} {:+.2f}, smoothed |{:.2f}|, CME base {:.2f} {:.2f} {:.2f} local {:.2f} {:.2f} {:.2f}, applied world {:+.2f} {:+.2f} {:+.2f}, convention error direct {:.3f} transposed {:.3f}, knee shift {:.2f} ankle shift {:.2f}",
+                        a_actor->GetFormID(), name, flexion * 57.29578f, kneeHeight, onFloor ? " (floor)" : "", target.x, target.y, target.z, side.push.Length(),
+                        side.knee.base.x, side.knee.base.y, side.knee.base.z, cme->local.translate.x, cme->local.translate.y, cme->local.translate.z,
+                        applied.x, applied.y, applied.z, errDirect, errTransposed, a_state.kneeShift, a_state.ankleShift);
+                }
+            }
+
+            const auto kneeOffset = (side.push - thighDir * a_state.kneeShift) * unit;
+            const auto ankleOffset = shinDir * (-a_state.ankleShift * unit);
+            write(side.knee, side.thigh.get(), kneeOffset);
+            for (auto& helper : side.helpers) {
+                write(helper, side.cmeThigh.get(), kneeOffset * (helper.along - 1.0f));
+            }
+            write(side.ankle, side.cmeCalf.get(), ankleOffset);
+            side.kneeApplied = a_state.kneeShift;
+            side.ankleApplied = a_state.ankleShift;
+        }
+        if (knee.draw) {
+            LegDebug::Submit(a_actor->GetFormID(), std::move(items));
+        }
+        if (dump && knee.poseDump) {
+            // Contact points for offline role analysis (which position fits a petite actor)
+            constexpr std::array poseNodes{ "NPC Head [Head]", "NPC Pelvis [Pelv]", "NPC Spine2 [Spn2]", "NPC L Hand [LHnd]",
+                "NPC R Hand [RHnd]", "NPC L Calf [LClf]", "NPC R Calf [RClf]", "NPC L Foot [Lft ]", "NPC R Foot [Rft ]", "VaginaB1" };
+            std::string line = std::format("Pose dump {:X} scale {:.3f}:", a_actor->GetFormID(), npc->world.scale);
+            for (const auto* name : poseNodes) {
+                if (const auto node = a_actor->GetNodeByName(name)) {
+                    const auto& p = node->world.translate;
+                    line += std::format(" {}={:.1f},{:.1f},{:.1f}", name, p.x, p.y, p.z);
+                }
+            }
+            logger::info("{}", line);
+        }
+        if (knee.morph) {
+            HeelMath::KneeMorphParams params{};
+            params.start = knee.morphStart;
+            params.full = knee.morphFull;
+            params.hold = knee.morphHold;
+            params.deepStart = knee.deepStart;
+            params.deepFull = knee.deepFull;
+            auto& tracker = a_state.kneeMorph;
+            const float before = tracker.applied;
+            const float amounts = knee.ubeCalfUpper * 1.0f + knee.ubeThighLower * 3.0f + knee.ubeThighBack * 7.0f +
+                                  knee.cbbeCalfSize * 13.0f + knee.cbbeCalfSmooth * 29.0f + knee.ubeDeepCalfUpper * 31.0f + knee.cbbeDeepCalfSize * 37.0f +
+                                  knee.ubeThighOuter * 41.0f + knee.cbbeCalfDepth * 43.0f + knee.cbbeLegsFuller * 47.0f;
+            const bool retuned = tracker.applied > 0.0f && amounts != a_state.kneeMorphAmounts;  // INI edited live
+            a_state.kneeMorphAmounts = amounts;
+            if (HeelMath::KneeMorphStep(tracker, deepest, a_delta, params) || retuned) {
+                if (tracker.applied > 0.0f) {
+                    SetKneeMorphs(a_actor, tracker.applied, tracker.appliedDeep, knee);
+                } else {
+                    ClearKneeMorphs(a_actor);
+                }
+                logger::info("Knee morph {:X}: deepest flexion {:.0f} deg, gain {:.2f} -> {:.2f}, deep {:.2f} (UBE calf upper {:+.2f}, 3BA calf size {:+.2f} smooth {:+.2f})",
+                    a_actor->GetFormID(), tracker.peak, before, tracker.applied, tracker.appliedDeep,
+                    knee.ubeCalfUpper * tracker.applied + knee.ubeDeepCalfUpper * tracker.appliedDeep,
+                    knee.cbbeCalfSize * tracker.applied + knee.cbbeDeepCalfSize * tracker.appliedDeep, knee.cbbeCalfSmooth * tracker.applied);
+            }
         }
     }
 

@@ -2,6 +2,7 @@
 
 #include "API/IPluginInterface.h"
 #include "Registry/Define/RaceKey.h"
+#include "Registry/Util/HeelMath.h"
 
 namespace Registry
 {
@@ -32,6 +33,8 @@ namespace Registry
         // other heel system put on the "NPC" node. Scenes either cancel it, or, when the actor stands
         // on their feet, keep it and shrink the actor so the pelvis stays where the animation wants it.
         void SetHeelsOnly(RE::Actor* a_actor);
+        // What the coming stage needs to line up while standing: the pelvis (sex), the head (kissing) or both
+        void SetStageFocus(RE::Actor* a_actor, float a_pelvisWeight, float a_headWeight);
         void UpdateHeels(RE::Actor* a_actor, float a_delta, bool a_animationRunning);
         bool WearsHighHeels(RE::Actor* a_actor);
         void CleanupStaleHeels();
@@ -40,6 +43,40 @@ namespace Registry
         void RefreshBaseNode(RE::Actor* a_actor);
 
       private:
+        // A translation we add to a node the animation never writes (XPMSSE "CME" nodes)
+        struct LegJoint
+        {
+            RE::NiPointer<RE::NiAVObject> node{};
+            RE::NiPoint3 base{};     // the node's own translation, without ours
+            RE::NiPoint3 written{};  // what we wrote last, to see whether someone else wrote since
+            float along{ 1.0f };     // thigh helpers: place along the thigh, 0 = hip, 1 = knee
+            bool touched{ false };
+        };
+
+        struct LegSide
+        {
+            RE::NiPointer<RE::NiAVObject> thigh{};
+            RE::NiPointer<RE::NiAVObject> calf{};
+            RE::NiPointer<RE::NiAVObject> cmeThigh{};
+            RE::NiPointer<RE::NiAVObject> cmeCalf{};
+            LegJoint knee{};                  // "CME Thigh": carries the calf, so moving it moves the knee joint
+            LegJoint ankle{};                 // "CME Knee": carries the foot
+            std::vector<LegJoint> helpers{};  // the other children of "CME Thigh" (thigh flesh helpers)
+            RE::NiPoint3 thighAxis{};         // hip -> knee in the thigh's local frame
+            RE::NiPoint3 shinAxis{};          // knee -> ankle in the calf's local frame
+            RE::NiPoint3 push{};              // smoothed knee push, skeleton units, world axes
+            float kneeApplied{ 0.0f };        // shifts in effect, skeleton units
+            float ankleApplied{ 0.0f };
+        };
+
+        struct LegRig
+        {
+            RE::NiPointer<RE::NiAVObject> root{};
+            std::array<LegSide, 2> sides{};
+            bool ready{ false };
+            bool failed{ false };
+        };
+
         struct HeelState
         {
             std::optional<float> absoluteScale{};  // scene scale requested by the animation, none = keep the actor's own
@@ -62,6 +99,19 @@ namespace Registry
             bool sampling{ false };
             bool applied{ false };
             bool standingKnown{ false };
+            float head{ 0.0f };                     // head height while standing, skeleton units
+            float thighVertical{ 1.0f };            // vertical share of thigh and shin of the supporting leg
+            float shinVertical{ 1.0f };
+            std::vector<float> heads{};
+            std::vector<float> thighVerticals{};
+            std::vector<float> shinVerticals{};
+            float pelvisWeight{ 1.0f };             // what this stage lines up (SetStageFocus)
+            float headWeight{ 0.2f };
+            float kneeShift{ 0.0f };                // joint shifts asked for now, weight included, skeleton units
+            float ankleShift{ 0.0f };
+            LegRig legs{};
+            HeelMath::KneeMorphTracker kneeMorph{};  // corrective body morphs by knee flexion
+            float kneeMorphAmounts{ 0.0f };          // signature of the slider amounts last written
         };
 
         SKEE::INiTransformInterface* GetModernInterface() const;
@@ -73,6 +123,10 @@ namespace Registry
         void DecideStance(RE::Actor* a_actor, HeelState& a_state);
         void SetLegScale(RE::Actor* a_actor, bool a_female, HeelState& a_state, float a_legScale);
         bool RemoveLegScale(RE::Actor* a_actor, bool a_female);
+        bool CaptureLegs(RE::Actor* a_actor, LegRig& a_rig);
+        void UpdateLegs(RE::Actor* a_actor, HeelState& a_state, float a_delta);
+        static void RestoreLegs(LegRig& a_rig);
+        void ResetSampling(HeelState& a_state);
 
         struct ScaleNodeVisitor : public SKEE::INiTransformInterface::NodeVisitor
         {

@@ -9,7 +9,7 @@ def validate_value(value):
     return "1"
   if value == "false":
     return "0"
-  match = re.match(r'^(\d+\.\d+|\d+)f$', value)
+  match = re.match(r'^(-?\d+\.\d+|-?\d+)f$', value)
   if match:
     return match.group(1)
   else:

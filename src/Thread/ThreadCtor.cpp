@@ -374,8 +374,18 @@ namespace Thread
         })) return {};
         const auto roles = GetSceneHeightRoles(a_scene);
         if (!roles) return {};
-        // Owner exception: the scene does not say which woman is petite, so either woman may take either role.
-        if (IsUnmarkedPetiteFemalePairScene(a_scene, GetSceneProfile(), positions.size())) return found;
+        // Owner exception: the scene does not mark which woman is petite. Billyy's Petite packs animate the petite
+        // woman in the first position (owner checked 31 Petite Lesbian scenes in game 2026-11-11: with the petite
+        // actor in A2 every one was swapped), so she goes first; the other order is kept only if nothing else fits.
+        if (IsUnmarkedPetiteFemalePairScene(a_scene, GetSceneProfile(), positions.size())) {
+            const auto isShort = [&](RE::Actor* a_actor) {
+                const auto p = std::ranges::find_if(positions, [a_actor](const auto& it) { return it.data.GetActor() == a_actor; });
+                return p != positions.end() && p->data.GetRaceRelativeHeight() <= Settings::fPetiteAdultScale;
+            };
+            std::vector<std::vector<RE::Actor*>> petiteFirst;
+            std::ranges::copy_if(found, std::back_inserter(petiteFirst), [&](const auto& a) { return !a.empty() && isShort(a.front()); });
+            return petiteFirst.empty() ? found : petiteFirst;
+        }
         std::erase_if(found, [&](const auto& assignment) {
             std::vector<bool> shortActors;
             for (auto* actor : assignment) {

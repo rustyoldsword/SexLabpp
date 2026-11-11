@@ -8,6 +8,7 @@
 #include "Elements/SceneSelectPanel.h"
 #include "Elements/ThreadConfigPanel.h"
 #include "Elements/DebugNodeDraw.h"
+#include "Registry/Util/LegDebug.h"
 
 namespace Thread::Interface
 {
@@ -132,6 +133,8 @@ namespace Thread::Interface
 
         if (instance->GetThreadProperty<bool>("ElementUI_DebugNodeDraw"))
             _elements->debugNodeDraw.Render(*this);
+
+        Registry::LegDebug::Render();
 
         if (!_focused)
             return;

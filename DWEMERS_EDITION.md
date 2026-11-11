@@ -1,4 +1,4 @@
-# SexLab P++ Dwemer's Edition 2.19.5 (for SexLab P+ 2.19.0)
+# SexLab P++ Dwemer's Edition 2.19.6 (for SexLab P+ 2.19.0)
 
 A patch package for **SexLab P+ 2.19.0**. Each patch can be switched off in the SexLab MCM; with every switch off,
 SexLab P+ runs its own stock code.
@@ -7,7 +7,7 @@ SexLab P+ runs its own stock code.
 | Switch | What it does |
 |---|---|
 | Petite Profiles | Short adult actors take part in scenes and get scenes and roles made for their height. Normal-height actors never take a short role |
-| Heels Compensation | An actor standing on the feet keeps the heels: the body is scaled down a little (not below 0.95) and the thighs are shortened for the rest, so the pelvis lands where the animation expects. Everyone else has the heel lift removed |
+| Heels Compensation | An actor standing on the feet keeps the heels; the heel lift is shared between a slightly smaller body, slightly slimmer legs and shorter knee and ankle joints, so the pelvis (sex) or the head (kissing) lands where the animation expects. Everyone else has the heel lift removed. Bent knees get corrective body morphs |
 | Clothing tab | Clothing tab in the scene HUD, with strip/redress rules per clothing group |
 | Devious Devices scene filter | Scenes are chosen by the devices each actor wears, using DD's own rules |
 | Enjoyment fix | Keeps the fraction of every enjoyment tick, so actors with a small gain no longer get stuck below orgasm |
@@ -25,10 +25,37 @@ A read-only list of the mods this build works with and whether each is active. H
 Install SexLab P+ 2.19.0 first, then install this package with a mod manager and let it overwrite SexLab P+.
 Start a new game.
 
-Requirements: SKSE, SexLab P+ 2.19.0, SKSE Menu Framework (scene HUD), RaceMenu (Heels Compensation).
-Optional: Devious Devices NG (scene filter).
+Requirements: SKSE, SexLab P+ 2.19.0, SKSE Menu Framework (scene HUD), RaceMenu (Heels Compensation and knee morphs),
+XPMSSE (knee and ankle joints).
+Optional: Devious Devices NG (scene filter). Recommended: Better Deformation with `NPC L Calf [LClf]` and
+`NPC R Calf [RClf]` set to 1.0 in `BetterDeformation.json`, which keeps the front of a bent knee round.
 
 ## Changelog
+### 2.19.6
+A big step for knees and alignment: scenes on heels, kneeling and squatting now look much better than before.
+
+Heels and alignment:
+- The heel lift is now shared between four small changes, each kept below the point where it shows: the whole body
+  slightly smaller, the legs slightly slimmer, the knee and ankle joints slightly shorter (XPMSSE `CME` joints, spread
+  over the skin blend). The soles stay exactly on the floor.
+- What has to match the animation depends on the stage: the pelvis for sex, the head for kissing, both when a stage
+  does both, half and half for hugging and other face-to-face stages. Kissing partners on different heels now meet at
+  the mouth.
+- `[Heels]` keys in `SexLab.ini`: `bHeelLegJoints`, `bHeelStageFocus`, `fHeelTol*`, `fHeelKneeBlend`,
+  `fHeelAnkleBlend`, `fHeelMaxKneeShift`, `fHeelMaxAnkleShift`. `fHeelBodyMinFactor` is no longer used.
+
+Knees:
+- On a deeply bent knee (kneeling, squatting, sitting on the heels) the calf used to come through the thigh. Every
+  scene actor now gets corrective body morphs by how far the knee is bent, the way real flesh gives way: a thinner calf
+  back and a fuller lower thigh, with a second step for kneeling upright. UBE and CBBE 3BA sliders are both written; a
+  body uses only the ones it has. The morphs are removed when the scene ends; animations are not changed.
+- The amounts were tuned on the real UBE and 3BA bodies (their own meshes, skin weights and sliders) and checked in game.
+  `[Knees]` keys in `SexLab.ini` (`bKneeMorph`, `fKneeMorph*`) change them.
+
+Petite:
+- One petite woman + one normal-height woman in Petite-tagged scenes without role marks (Billyy Petite Lesbian): the
+  petite woman now takes her own role (the first position) instead of either role.
+
 ### 2.19.5
 Petite:
 - A short adult is now recognised by her height relative to her race, not by the rendered scale. A 0.8 NPC of a race
@@ -81,27 +108,3 @@ Not ported from dev.1: the CumFx changes (Afterglow paints the cum overlays in t
 
 ### 2.19.0
 - First release.
-
-## This repository
-A fork of [SLP-Community/SexLabpp](https://github.com/SLP-Community/SexLabpp) at commit `d578f817` (SexLab P+ 2.19.0),
-branch `dwemers-edition`. Licensed under GPL-3.0 like the upstream project. The dev.1 fixes are cherry-picked from
-crajjjj's SexLab P+ 2.19.0-dev.1 pull requests (#77, #78, #79, #84, #85, #86); the CumFx ones (#80-#82) are left out.
-
-| Path | |
-|---|---|
-| `src/Papyrus/SLPPatches.*` | natives for the MCM pages (integrations, patch version) |
-| `src/Registry/Util/Scale.*` | Petite Profiles and Heels Compensation |
-| `src/Thread/AdultHeightPolicy.h`, `src/Thread/ThreadCtor.cpp` | height roles, Devious Devices scene filter |
-| `src/Registry/Util/Wardrobe.*`, `src/Thread/Interface/Elements/ClothingPanel.*` | Clothing tab and its rules |
-| `src/Registry/Define/Sex.cpp`, `src/Registry/Library.*` | TNG gender, voice sex sync |
-| `src/Thread/PostSceneGuard.*` | stance and tilt guards |
-| `src/UserData/StripData.*`, `src/UserData/StripYaml.h` | Strip Editor persistence fix |
-| `src/UserData/mcm.def` | the switches (`bPatch*`) |
-| `dist/Source/Scripts/` | the shipped `sslConfigMenu.psc`, `sslActorAlias.psc`, `SexLabThread.psc`, `SLPPatches.psc` |
-| `dist/Interface/SexLab/Clothing/` | Clothing tab icons |
-
-Build like upstream:
-```
-xmake f -m release --build_papyrus=n --build_spriggit=n --build_assets=n -y
-xmake
-```

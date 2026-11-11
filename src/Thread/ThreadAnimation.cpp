@@ -1,6 +1,7 @@
 #include "Thread.h"
 
 #include "GameForms.h"
+#include "Registry/Util/LegDebug.h"
 #include "Registry/Util/Scale.h"
 #include "Thread/Collision/CollisionHandler.h"
 #include "Thread/Hooks.h"
@@ -13,6 +14,39 @@ namespace Thread
 {
     namespace
     {
+        // What a standing stage on heels has to line up with the bare-foot animation (pelvis weight, head weight):
+        // the pelvis for anything between the hips, the head for kissing, both when a stage does both.
+        std::pair<float, float> StandingFocus(const Registry::Scene* a_scene, const Registry::Stage* a_stage)
+        {
+            if (!::Settings::bHeelStageFocus) {
+                return { 1.0f, 0.2f };
+            }
+            using Registry::Tag;
+            const auto& tags = a_stage && !a_stage->tags.IsEmpty() ? a_stage->tags : a_scene->tags;
+            const auto any = [&](std::initializer_list<Tag> a_list) {
+                return std::ranges::any_of(a_list, [&](Tag a_tag) { return tags.HasTag(a_tag); });
+            };
+            const bool hips = any({ Tag::Vaginal, Tag::Anal, Tag::Penetration, Tag::DoublePenetration, Tag::TriplePenetration,
+                Tag::Grinding, Tag::Tribadism, Tag::Fingering, Tag::Fisting, Tag::Toys, Tag::Buttjob, Tag::Handjob,
+                Tag::Blowjob, Tag::Deepthroat, Tag::Cunnilingus, Tag::Oral, Tag::SixtyNine, Tag::Rimming, Tag::FaceSitting,
+                Tag::Spanking, Tag::Masturbation });
+            const bool kissing = any({ Tag::Kissing });
+            const bool embrace = any({ Tag::Hugging, Tag::Loving, Tag::Holding, Tag::Facing });
+            if (hips && kissing) {
+                return { 1.0f, 1.0f };
+            }
+            if (kissing) {
+                return { 0.1f, 1.0f };
+            }
+            if (hips) {
+                return { 1.0f, 0.1f };
+            }
+            if (embrace) {
+                return { 0.5f, 0.5f };
+            }
+            return { 1.0f, 0.2f };
+        }
+
         enum ActorStatus : int32_t
         {
             Unconscious = -5,
@@ -477,6 +511,7 @@ namespace Thread
     void Instance::UpdateAnimations(float a_delta)
     {
         const auto timeoutDelta = Util::IsGamePausedOrFrozen() ? 0.0f : a_delta;
+        Registry::LegDebug::Poll(a_delta);
         std::shared_lock lock{ _mInstances };
         for (auto&& instance : instances) {
             instance->UpdateFixedLengthTimer(timeoutDelta);
@@ -632,6 +667,8 @@ namespace Thread
             if (firstDispatch) {
                 const auto& positionInfo = activeScene->GetNthPosition(pending.position);
                 Collision::CollisionHandler::AddActor(pending.actor->GetFormID());
+                const auto [pelvisWeight, headWeight] = StandingFocus(activeScene, activeStage);
+                Registry::Scale::GetSingleton()->SetStageFocus(pending.actor, pelvisWeight, headWeight);
                 if (petiteProfilesEnabled && ShouldPreserveActorScale(pending.actor)) {
                     logger::info("Scene scaling preserved for petite actor {:X}.", pending.actor->GetFormID());
                     Registry::Scale::GetSingleton()->SetHeelsOnly(pending.actor);
