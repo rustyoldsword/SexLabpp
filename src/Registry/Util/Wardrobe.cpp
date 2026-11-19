@@ -1,6 +1,7 @@
 #include "Wardrobe.h"
 
 #include "Registry/Util/Scale.h"
+#include "Util/SafeYaml.h"
 #include "UserData/StripData.h"
 
 namespace Registry
@@ -482,17 +483,25 @@ namespace Registry
     // Persistence
     // ---------------------------------------------------------------------------------------------
 
+    void Wardrobe::ResetSceneState()
+    {
+        std::scoped_lock lock{ _m };
+        _scene.clear();
+        _removed.clear();
+    }
+
     void Wardrobe::Load()
     {
         std::scoped_lock lock{ _m };
         _global = {};
         _actors.clear();
+        _unloadedActors = YAML::Node{};
         try {
-            if (!fs::exists(kClothingPath)) {
+            if (!Util::SafeYaml::Exists(kClothingPath)) {
                 logger::info("Wardrobe: no saved rules yet");
                 return;
             }
-            const auto root = YAML::LoadFile(kClothingPath);
+            const auto root = Util::SafeYaml::Load(kClothingPath);
             _global = ProfileFromYaml(root["global"]);
             const auto handler = RE::TESDataHandler::GetSingleton();
             const auto actors = root["actors"];
@@ -503,7 +512,9 @@ namespace Registry
             for (const auto&& plugin : actors) {
                 const auto esp = plugin.first.as<std::string>();
                 if (!handler->LookupModByName(esp)) {
-                    logger::info("Wardrobe: skipping rules for {}, plugin is not loaded", esp);
+                    // kept as they are and written back, so the rules return with the plugin
+                    logger::info("Wardrobe: keeping rules for {}, plugin is not loaded", esp);
+                    _unloadedActors[esp] = plugin.second;
                     continue;
                 }
                 for (const auto&& entry : plugin.second) {
@@ -527,6 +538,9 @@ namespace Registry
             YAML::Node root;
             if (!IsProfileEmpty(_global))
                 root["global"] = ProfileToYaml(_global);
+            for (const auto&& plugin : _unloadedActors) {
+                root["actors"][plugin.first.as<std::string>()] = plugin.second;
+            }
             for (const auto& [formid, profile] : _actors) {
                 if (IsProfileEmpty(profile))
                     continue;
@@ -537,9 +551,9 @@ namespace Registry
                 }
                 root["actors"][key->first][key->second] = ProfileToYaml(profile);
             }
-            fs::create_directories(fs::path{ kClothingPath }.parent_path());
-            std::ofstream{ kClothingPath } << root;
-            _dirty = false;
+            if (Util::SafeYaml::Save(kClothingPath, root)) {
+                _dirty = false;
+            }
         } catch (const std::exception& e) {
             logger::error("Wardrobe: unable to save {}: {}", kClothingPath, e.what());
         }

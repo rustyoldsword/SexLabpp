@@ -39,7 +39,7 @@ namespace Registry
 
     ActorFragment::ActorFragment(RE::Actor* a_actor, bool a_submissive) :
       actor(a_actor), value(Value::None), scale(Scale::GetSingleton()->GetScale(a_actor)),
-      height(Scale::GetSingleton()->GetRaceRelativeHeight(a_actor))
+      height(Scale::GetSingleton()->GetPetiteHeight(a_actor))
     {
         const auto sex = Registry::GetSex(a_actor);
         switch (sex) {

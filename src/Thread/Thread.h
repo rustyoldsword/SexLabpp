@@ -235,6 +235,8 @@ namespace Thread
         SceneProfile GetSceneProfile() const;
         bool IsCompatibleSceneProfile(const Registry::Scene* a_scene, SceneProfile a_profile) const;
         bool ShouldPreserveActorScale(RE::Actor* a_actor) const;
+        // the scene scale for a preserved petite actor below fPetiteMinScale; nullopt = keep her own height
+        std::optional<float> GetPetiteFloorScale(RE::Actor* a_actor) const;
         bool HasOnlyHumanActors() const;
         std::vector<std::vector<RE::Actor*>> GetCompatibleAssignments(const Registry::Scene* a_scene) const;
         RE::Actor* InitializeReferences(const std::vector<RE::Actor*>& a_submissives);

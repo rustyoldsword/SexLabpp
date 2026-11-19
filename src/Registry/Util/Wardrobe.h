@@ -93,6 +93,9 @@ namespace Registry
         bool OnStripped(RE::Actor* a_actor, RE::TESBoundObject* a_item, WardrobeGroup a_group, RedressRule a_redress);
         // Called when a thread is destroyed: puts back what the panel took off.
         void EndScene(const std::vector<RE::Actor*>& a_actors, const std::vector<bool>& a_redressAllowed);
+        // A save is being loaded: scene-only rules and items taken off in the session being left are forgotten,
+        // so nothing of another save is put back on or applied.
+        void ResetSceneState();
 
         // --- Live control from the panel ------------------------------------------------------
         struct WornItem
@@ -129,6 +132,7 @@ namespace Registry
         void Unequip(RE::Actor* a_actor, RE::TESBoundObject* a_item);
 
         mutable std::mutex _m;
+        YAML::Node _unloadedActors;  // "actors" entries of plugins that are not loaded now, written back unchanged
         Profile _global{};
         std::unordered_map<RE::FormID, Profile> _actors;   // keyed by base NPC
         std::unordered_map<RE::FormID, Profile> _scene;    // keyed by reference, cleared by EndScene

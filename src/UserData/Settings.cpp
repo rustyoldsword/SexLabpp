@@ -1,5 +1,7 @@
 #include "Settings.h"
 
+#include "Util/SafeYaml.h"
+
 #include <SimpleIni.h>
 
 void Settings::Initialize()
@@ -19,13 +21,13 @@ struct is_vector<std::vector<T, Alloc>> : std::true_type
 
 void Settings::InitializeYAML()
 {
-    if (!fs::exists(YAMLPATH)) {
+    if (!Util::SafeYaml::Exists(YAMLPATH)) {
         logger::error("No Settings file (yaml) in {}", YAMLPATH);
         return;
     }
 
     try {
-        const auto yaml = YAML::LoadFile(YAMLPATH);
+        const auto yaml = Util::SafeYaml::Load(YAMLPATH);
         const auto ReadMCM = [&yaml]<typename T>(const char* a_key, T& a_out) {
             if (!yaml[a_key].IsDefined())
                 return;
@@ -121,8 +123,7 @@ void Settings::Save()
 #include "mcm.def"
 #undef MCM_SETTING
 
-    std::ofstream fout{ YAMLPATH };
-    fout << settings;
+    Util::SafeYaml::Save(YAMLPATH, settings);
     logger::info("Finished saving user settings");
 }
 

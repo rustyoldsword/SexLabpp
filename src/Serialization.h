@@ -2,6 +2,9 @@
 
 #include "Papyrus/sslLibrary/Serialize.h"
 #include "Registry/Stats.h"
+#include "Registry/Util/Wardrobe.h"
+#include "Thread/Hooks.h"
+#include "Thread/PostSceneGuard.h"
 #include "Thread/Collision/CollisionHandler.h"
 #include "Thread/Thread.h"
 
@@ -75,6 +78,10 @@ namespace Serialization
         {
             Thread::Collision::CollisionHandler::Clear();
             Thread::Instance::ClearActorsAfterLoad();
+            // nothing of the session being left may act on the save being loaded
+            Registry::Wardrobe::GetSingleton()->ResetSceneState();
+            Thread::PostSceneGuard::Reset();
+            Thread::Hooks::SetWeaponDrawBlocked(false);
             Registry::Statistics::StatisticsData::GetSingleton()->Revert(a_intfc);
             Papyrus::Tracking::GetSingleton()->Revert(a_intfc);
         }

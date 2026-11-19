@@ -3,6 +3,7 @@
 #include "Thread.h"
 #include "GameForms.h"
 #include "PostSceneGuard.h"
+#include "Registry/Util/Scale.h"
 
 #include <intrin.h>
 
@@ -31,6 +32,7 @@ namespace Thread::Hooks
                 const bool paused = Util::IsGamePausedOrFrozen();
                 if (!paused) {
                     Thread::Interaction::NiSurface::Manager::OnFrameUpdate(frameDelta);
+                    Registry::Scale::GetSingleton()->Watchdog(frameDelta);
                 }
                 PostSceneGuard::Update(paused ? 0.0f : frameDelta, IsWeaponDrawBlocked());
             }

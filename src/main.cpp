@@ -12,6 +12,7 @@
 #include "Thread/Interface/UI/Theme.h"
 #include "Thread/Thread.h"
 #include "UserData/StripData.h"
+#include "Util/AsyncIO.h"
 
 // class EventHandler :
 // 	public Singleton<EventHandler>,
@@ -126,11 +127,14 @@ static void SKSEMessageHandler(SKSE::MessagingInterface::Message* message)
         Registry::Wardrobe::GetSingleton()->Load();
         break;
     case SKSE::MessagingInterface::kSaveGame:
-        std::thread([]() {
+        // One worker runs the saves one after another (two quick saves never write the same file at once);
+        // every file is replaced only when its new version is complete.
+        Util::AsyncIO::Submit([]() {
             Settings::Save();
             Registry::Library::GetSingleton()->Save();
             UserData::StripData::GetSingleton()->Save();
-        }).detach();
+            Registry::Wardrobe::GetSingleton()->Save();
+        });
         break;
     case SKSE::MessagingInterface::kPostLoadGame:
         // EventHandler::GetSingleton()->Register();

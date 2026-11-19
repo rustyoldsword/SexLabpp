@@ -26,5 +26,9 @@ namespace Thread::PostSceneGuard
 	void OnSceneEnd(const std::vector<RE::Actor*>& a_actors);
 
 	// Every frame from the frame hook (main thread). a_delta is 0 while the game is paused.
+	// Also lifts the player's draw block when the player has been outside every scene for a few seconds.
 	void Update(float a_delta, bool a_drawBlocked);
+
+	// A save is being loaded: forget every watch of the session that is being left.
+	void Reset();
 }

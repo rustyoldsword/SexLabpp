@@ -670,8 +670,13 @@ namespace Thread
                 const auto [pelvisWeight, headWeight] = StandingFocus(activeScene, activeStage);
                 Registry::Scale::GetSingleton()->SetStageFocus(pending.actor, pelvisWeight, headWeight);
                 if (petiteProfilesEnabled && ShouldPreserveActorScale(pending.actor)) {
-                    logger::info("Scene scaling preserved for petite actor {:X}.", pending.actor->GetFormID());
-                    Registry::Scale::GetSingleton()->SetHeelsOnly(pending.actor);
+                    if (const auto floor = GetPetiteFloorScale(pending.actor)) {
+                        logger::info("Petite actor {:X} below fPetiteMinScale: raised to {} for the scene.", pending.actor->GetFormID(), *floor);
+                        Registry::Scale::GetSingleton()->SetScale(pending.actor, positionInfo->data.GetRace(), *floor);
+                    } else {
+                        logger::info("Scene scaling preserved for petite actor {:X}.", pending.actor->GetFormID());
+                        Registry::Scale::GetSingleton()->SetHeelsOnly(pending.actor);
+                    }
                 } else {
                     Registry::Scale::GetSingleton()->SetScale(pending.actor, positionInfo->data.GetRace(), positionInfo->data.GetScale());
                 }

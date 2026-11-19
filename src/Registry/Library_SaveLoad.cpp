@@ -1,6 +1,7 @@
 #include "Library.h"
 
 #include "Util/Combinatorics.h"
+#include "Util/SafeYaml.h"
 #include "Util/StringUtil.h"
 
 namespace Registry
@@ -138,7 +139,7 @@ namespace Registry
                 continue;
             const auto filename = file.path().filename().string();
             try {
-                const auto root = YAML::LoadFile(file.path().string());
+                const auto root = Util::SafeYaml::Load(file.path());
                 for (auto&& [key, scene] : sceneMap) {
                     const auto node = root[scene->id];
                     if (!node.IsDefined())
@@ -204,7 +205,7 @@ namespace Registry
                 continue;
             const auto filename = file.path().filename().string();
             try {
-                const auto yaml = YAML::LoadFile(file.path().string());
+                const auto yaml = Util::SafeYaml::Load(file.path());
                 auto profile = Expression{ yaml };
                 if (expressions.emplace(profile.GetId(), std::move(profile)).second) {
                     logger::info("InitializeExpressions: Added expression {}", filename);
@@ -309,10 +310,10 @@ namespace Registry
 
     void Library::InitializeVoiceSettings() noexcept
     {
-        if (!FolderExists(VOICE_SETTING_PATH, false))
+        if (!Util::SafeYaml::Exists(VOICE_SETTING_PATH))
             return;
         try {
-            const auto root = YAML::LoadFile(VOICE_SETTING_PATH);
+            const auto root = Util::SafeYaml::Load(VOICE_SETTING_PATH);
             for (auto&& it : root) {
                 const RE::BSFixedString voiceId = it.first.as<std::string>();
                 const auto voice = voices.find(voiceId);
@@ -330,10 +331,10 @@ namespace Registry
 
     void Library::InitializeVoiceCache() noexcept
     {
-        if (!FolderExists(VOICE_SETTINGS_CACHES_PATH, false))
+        if (!Util::SafeYaml::Exists(VOICE_SETTINGS_CACHES_PATH))
             return;
         try {
-            const auto root = YAML::LoadFile(VOICE_SETTINGS_CACHES_PATH);
+            const auto root = Util::SafeYaml::Load(VOICE_SETTINGS_CACHES_PATH);
             for (auto&& it : root) {
                 const auto npcIdStr = it.first.as<std::string>();
                 const auto id = Util::FormFromString(npcIdStr);
@@ -501,8 +502,7 @@ namespace Registry
                     scene->Save(node);
                 }
                 const auto filepath = std::format("{}\\{}_{}.yaml", SCENE_USER_CONFIG, p->GetName().data(), p->GetHash());
-                std::ofstream fout(filepath);
-                fout << data;
+                Util::SafeYaml::Save(filepath, data);
             });
         }
         for (auto&& thread : threads) {
@@ -522,22 +522,15 @@ namespace Registry
 
     void Library::SaveVoices() const noexcept
     {
-        const auto getSavefile = [](auto path) -> YAML::Node {
-            try {
-                if (fs::exists(path))
-                    return YAML::LoadFile(path);
-            } catch (const std::exception& e) {
-                logger::error("Error while loading voice settings {}: {}. The file will be re-generated", path, e.what());
-            }
-            return YAML::Node{};
-        };
+        // the save worker reads what game and Papyrus threads change
+        std::shared_lock lock{ _mVoice };
+        const auto getSavefile = [](auto path) -> YAML::Node { return Util::SafeYaml::Load(path); };
         auto settings = getSavefile(VOICE_SETTING_PATH);
         for (auto&& [name, voice] : voices) {
             auto voiceNode = settings[name.data()];
             voice.Save(voiceNode);
         }
-        std::ofstream fout_settings(VOICE_SETTING_PATH);
-        fout_settings << settings;
+        Util::SafeYaml::Save(VOICE_SETTING_PATH, settings);
 
         auto cache = getSavefile(VOICE_SETTINGS_CACHES_PATH);
         for (auto&& [id, voice] : savedVoices) {
@@ -551,8 +544,7 @@ namespace Registry
             auto str = Util::FormToString(form);
             cache[str] = voice->GetId().data();
         }
-        std::ofstream fout_caches(VOICE_SETTINGS_CACHES_PATH);
-        fout_caches << cache;
+        Util::SafeYaml::Save(VOICE_SETTINGS_CACHES_PATH, cache);
         logger::info("Saved voices");
     }
 

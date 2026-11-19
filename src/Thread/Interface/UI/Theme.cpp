@@ -1,6 +1,7 @@
 #include "Theme.h"
 
 #include "Util/AsyncIO.h"
+#include "Util/SafeFile.h"
 
 #include <fstream>
 #include <optional>
@@ -73,11 +74,8 @@ namespace Thread::Interface::UI::Theme
                 return;
             }
 
-            std::ofstream output{ path, std::ios::binary | std::ios::trunc };
-            output.write(buffer.data(), static_cast<std::streamsize>(buffer.size()));
-            output.close();
-            if (!output) {
-                logger::error("Unable to write UI theme to {}", THEME_PATH);
+            if (const auto error = Util::SafeFile::Write(path, buffer)) {
+                logger::error("Unable to write UI theme: {}", *error);
                 return;
             }
             logger::info("Saved UI theme to {}", THEME_PATH);

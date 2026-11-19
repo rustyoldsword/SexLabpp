@@ -1,5 +1,7 @@
 #include "Expression.h"
 
+#include "Util/SafeYaml.h"
+
 namespace Registry
 {
     namespace detail
@@ -272,8 +274,7 @@ namespace Registry
             }
         }
         file["enabled"] = enabled;
-        std::ofstream fout(std::format("{}\\{}.yaml", a_fileLocation, id));
-        fout << file;
+        Util::SafeYaml::Save(std::format("{}\\{}.yaml", a_fileLocation, id), file);
     }
 
     void Expression::UpdateValues(bool a_female, int a_level, std::vector<float> a_values)

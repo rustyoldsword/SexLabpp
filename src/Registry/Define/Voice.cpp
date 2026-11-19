@@ -1,5 +1,6 @@
 #include "Voice.h"
 
+#include "Util/SafeYaml.h"
 #include "Util/StringUtil.h"
 
 namespace Registry
@@ -119,8 +120,7 @@ namespace Registry
         for (auto&& e : extrasets) {
             root["Extra"].push_back(e.AsYaml());
         }
-        std::ofstream fout{ path };
-        fout << root;
+        Util::SafeYaml::Save(path, root);
     }
 
     void Voice::Save(YAML::Node& a_node) const

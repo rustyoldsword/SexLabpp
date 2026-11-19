@@ -21,12 +21,17 @@ namespace UserData
         void Load();
         void Save();
 
-        void AddArmor(RE::TESForm* a_form, Strip a_type) { strips[a_form->formID] = a_type; }
+        void AddArmor(RE::TESForm* a_form, Strip a_type)
+        {
+            std::scoped_lock lock{ _m };
+            strips[a_form->formID] = a_type;
+        }
         void RemoveArmor(RE::TESForm* a_form);
         void RemoveArmorAll();
 
       private:
         std::map<RE::FormID, Strip> strips{};
         YAML::Node _root;
+        mutable std::mutex _m;  // Papyrus threads edit, the save worker writes
     };
 }  // namespace UserData

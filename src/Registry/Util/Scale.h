@@ -23,8 +23,8 @@ namespace Registry
 
       public:
         float GetScale(RE::TESObjectREFR* a_reference);
-        // GetScale divided by the race height for the actor's sex (petite checks)
-        float GetRaceRelativeHeight(RE::Actor* a_actor);
+        // min(GetScale, GetScale / race height for the actor's sex): short by either measure (petite checks)
+        float GetPetiteHeight(RE::Actor* a_actor);
         void SetScale(RE::Actor* a_reference, float a_absolutescale);
         void SetScale(RE::Actor* a_reference, RaceKey a_racekey, float a_absolutescale);
         void RemoveScale(RE::Actor* a_reference);
@@ -37,7 +37,10 @@ namespace Registry
         void SetStageFocus(RE::Actor* a_actor, float a_pelvisWeight, float a_headWeight);
         void UpdateHeels(RE::Actor* a_actor, float a_delta, bool a_animationRunning);
         bool WearsHighHeels(RE::Actor* a_actor);
+        // After a load: forget scene states and remove what scenes left on the loaded actors
         void CleanupStaleHeels();
+        // Every frame (main thread): the same removal every sweepInterval seconds for actors outside scenes
+        void Watchdog(float a_delta);
 
         // Let SKEE rebuild the "NPC" node from the skeleton and the overrides it holds
         void RefreshBaseNode(RE::Actor* a_actor);
@@ -140,6 +143,10 @@ namespace Registry
             const auto intfc = SKEE::GetInterfaceMap();
             return intfc ? intfc->QueryInterface("NiTransform") : nullptr;
         }();
+
+        void SweepLeftovers();
+        static constexpr float sweepInterval{ 10.0f };
+        float sweepTimer{ 0.0f };
 
         std::recursive_mutex heelLock{};
         std::unordered_map<RE::FormID, HeelState> heelStates{};

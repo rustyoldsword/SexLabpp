@@ -20,7 +20,7 @@ namespace
     bool IsShortAdultActor(RE::Actor* a_actor)
     {
         return a_actor && Registry::RaceKey{ a_actor }.Is(Registry::RaceKey::Human) &&
-               Registry::Scale::GetSingleton()->GetRaceRelativeHeight(a_actor) <= Settings::fPetiteAdultScale;
+               Registry::Scale::GetSingleton()->GetPetiteHeight(a_actor) <= Settings::fPetiteAdultScale;
     }
 
     bool HasSceneTag(const Registry::Scene* a_scene, const std::string_view a_tag)
@@ -343,7 +343,7 @@ namespace Thread
         std::vector<AdultHeight::Participant> actors;
         for (const auto& p : positions) {
             actors.push_back({ p.data.IsSex(Registry::Sex::Male), p.data.IsSex(Registry::Sex::Female) || p.data.IsSex(Registry::Sex::Futa),
-                p.data.IsHuman() ? p.data.GetRaceRelativeHeight() : 1.0f });
+                p.data.IsHuman() ? p.data.GetPetiteHeight() : 1.0f });
         }
         const auto profile = AdultHeight::Classify(actors, Settings::fPetiteAdultScale);
         // This change owns adult humanoid roles; retain the legacy fallback for other actor compositions.
@@ -380,7 +380,7 @@ namespace Thread
         if (IsUnmarkedPetiteFemalePairScene(a_scene, GetSceneProfile(), positions.size())) {
             const auto isShort = [&](RE::Actor* a_actor) {
                 const auto p = std::ranges::find_if(positions, [a_actor](const auto& it) { return it.data.GetActor() == a_actor; });
-                return p != positions.end() && p->data.GetRaceRelativeHeight() <= Settings::fPetiteAdultScale;
+                return p != positions.end() && p->data.GetPetiteHeight() <= Settings::fPetiteAdultScale;
             };
             std::vector<std::vector<RE::Actor*>> petiteFirst;
             std::ranges::copy_if(found, std::back_inserter(petiteFirst), [&](const auto& a) { return !a.empty() && isShort(a.front()); });
@@ -391,7 +391,7 @@ namespace Thread
             for (auto* actor : assignment) {
                 const auto p = std::ranges::find_if(positions, [actor](const auto& it) { return it.data.GetActor() == actor; });
                 if (p == positions.end()) return true;
-                shortActors.push_back(p->data.GetRaceRelativeHeight() <= Settings::fPetiteAdultScale);
+                shortActors.push_back(p->data.GetPetiteHeight() <= Settings::fPetiteAdultScale);
             }
             return !AdultHeight::MatchesAssignment(shortActors, *roles);
         });
@@ -404,7 +404,7 @@ namespace Thread
             return p.data.GetActor() == a_actor;
         });
         if (position == positions.end() || !position->data.IsHuman() ||
-            position->data.GetRaceRelativeHeight() > Settings::fPetiteAdultScale) {
+            position->data.GetPetiteHeight() > Settings::fPetiteAdultScale) {
             return false;
         }
         // Unsupported adult mixes can only start with explicit compatible role metadata.
@@ -412,9 +412,16 @@ namespace Thread
         // Equally short adult participants use ordinary scenes at their original scale.
         // Read the captured scales so dispatch order cannot change this decision.
         const auto allShort = std::ranges::all_of(positions, [](const auto& p) {
-            return p.data.IsHuman() && p.data.GetRaceRelativeHeight() <= Settings::fPetiteAdultScale;
+            return p.data.IsHuman() && p.data.GetPetiteHeight() <= Settings::fPetiteAdultScale;
         });
         return allShort || GetSceneProfile() != SceneProfile::Normal;
+    }
+
+    std::optional<float> Instance::GetPetiteFloorScale(RE::Actor* a_actor) const
+    {
+        const auto position = std::ranges::find_if(positions, [a_actor](const auto& p) { return p.data.GetActor() == a_actor; });
+        // the scale captured when the thread was made: what is on screen now may already carry our own scaling
+        return position == positions.end() ? std::nullopt : AdultHeight::PetiteFloorScale(position->data.GetScale(), Settings::fPetiteMinScale);
     }
 
     void Instance::FilterScenesByDevices(FurniturePreference a_furniturePreference)

@@ -67,6 +67,49 @@ namespace Registry
             CallNiOverride("UpdateModelWeight", refr);
         }
 
+        bool InSceneFaction(RE::Actor* a_actor)
+        {
+            return GameForms::AnimatingFaction && a_actor->IsInFaction(GameForms::AnimatingFaction);
+        }
+
+        // Answer of NiOverride.HasBodyMorphKey(actor, "SexLabKneeFix"): knee morphs on an actor outside any scene
+        // are left over (a save made mid-scene, a scene that ended without its cleanup) and are cleared.
+        class KneeMorphLeftoverCheck final : public RE::BSScript::IStackCallbackFunctor
+        {
+          public:
+            explicit KneeMorphLeftoverCheck(RE::ActorHandle a_actor) : actor(a_actor) {}
+            void operator()(RE::BSScript::Variable a_result) override
+            {
+                if (!a_result.IsBool() || !a_result.GetBool()) {
+                    return;
+                }
+                const auto target = actor.get();
+                if (!target || InSceneFaction(target.get())) {
+                    return;
+                }
+                logger::info("Knee morph {:X}: left over outside a scene, cleared", target->GetFormID());
+                ClearKneeMorphs(target.get());
+            }
+            void SetObject(const RE::BSTSmartPointer<RE::BSScript::Object>&) override {}
+
+          private:
+            RE::ActorHandle actor;
+        };
+
+        void CheckKneeMorphLeftover(RE::Actor* a_actor)
+        {
+            static bool unavailable{ false };  // no RaceMenu/NiOverride: there are no knee morphs to find
+            if (unavailable) {
+                return;
+            }
+            Script::CallbackPtr check{ new KneeMorphLeftoverCheck(a_actor->GetHandle()) };
+            auto args = RE::MakeFunctionArguments(static_cast<RE::TESObjectREFR*>(a_actor), RE::BSFixedString(kneeMorphKey));
+            if (!Script::DispatchStaticCall("NiOverride", "HasBodyMorphKey", check, args)) {
+                unavailable = true;
+                logger::warn("Knee morph: NiOverride.HasBodyMorphKey could not be called; leftover checks off for this session");
+            }
+        }
+
         float Median(std::vector<float>& a_values)
         {
             std::ranges::nth_element(a_values, a_values.begin() + a_values.size() / 2);
@@ -108,14 +151,15 @@ namespace Registry
         return retVal;
     }
 
-    float Scale::GetRaceRelativeHeight(RE::Actor* a_actor)
+    float Scale::GetPetiteHeight(RE::Actor* a_actor)
     {
         assert(a_actor);
         const auto scale = GetScale(a_actor);
         const auto race = a_actor->GetRace();
         const float raceHeight = race ? race->data.height[IsFemale(a_actor) ? RE::SEXES::kFemale : RE::SEXES::kMale] : 1.0f;
-        const auto ret = Thread::AdultHeight::RaceRelativeHeight(scale, raceHeight);
-        logger::info("Race relative height: {:X} -> {} / race {} => {}", a_actor->GetFormID(), scale, raceHeight, ret);
+        const auto relative = Thread::AdultHeight::RaceRelativeHeight(scale, raceHeight);
+        const auto ret = Thread::AdultHeight::PetiteHeight(scale, raceHeight);
+        logger::info("Race relative height: {:X} -> {} / race {} => {}, petite height {}", a_actor->GetFormID(), scale, raceHeight, relative, ret);
         return ret;
     }
 
@@ -1073,12 +1117,32 @@ namespace Registry
 
     void Scale::CleanupStaleHeels()
     {
-        const auto modernInterface = GetModernInterface();
         {
             std::scoped_lock lock{ heelLock };
             heelStates.clear();
         }
-        if (!modernInterface || !GameForms::AnimatingFaction) {
+        sweepTimer = 0.0f;
+        SweepLeftovers();
+    }
+
+    void Scale::Watchdog(float a_delta)
+    {
+        sweepTimer += a_delta;
+        if (sweepTimer < sweepInterval) {
+            return;
+        }
+        sweepTimer = 0.0f;
+        SweepLeftovers();
+    }
+
+    // Everything a scene puts on an actor is removed once the actor is outside every scene: the scene scale and
+    // heel translation on "NPC" (key "SexLabRegistry"), the leg shortening and the knee morphs. Runs after a load
+    // and every few seconds for the loaded actors, so nothing a crash, a mid-scene save or a skipped cleanup left
+    // behind can stay.
+    void Scale::SweepLeftovers()
+    {
+        const auto modernInterface = GetModernInterface();
+        if (!GameForms::AnimatingFaction) {
             return;
         }
         std::vector<RE::Actor*> actors{ RE::PlayerCharacter::GetSingleton() };
@@ -1090,17 +1154,28 @@ namespace Registry
             }
         }
         for (const auto actor : actors) {
-            if (!actor || actor->IsInFaction(GameForms::AnimatingFaction)) {
+            if (!actor || !actor->Get3D() || actor->IsInFaction(GameForms::AnimatingFaction)) {
                 continue;
             }
-            const auto female = IsFemale(actor);
-            if (modernInterface->RemoveNodeTransformPosition(actor, false, female, basenode, namekey)) {
-                logger::info("Heels {:X}: removed heel compensation left over from an unfinished scene", actor->GetFormID());
-                modernInterface->UpdateNodeTransforms(actor, false, female, basenode);
+            {
+                std::scoped_lock lock{ heelLock };
+                if (const auto where = heelStates.find(actor->GetFormID()); where != heelStates.end()) {
+                    RestoreLegs(where->second.legs);
+                    heelStates.erase(where);
+                    logger::info("Heels {:X}: scene state left after the scene, dropped", actor->GetFormID());
+                }
             }
-            if (RemoveLegScale(actor, female)) {
-                logger::info("Heels {:X}: removed leg shortening left over from an unfinished scene", actor->GetFormID());
+            if (modernInterface) {
+                const auto female = IsFemale(actor);
+                if (modernInterface->RemoveNodeTransform(actor, false, female, basenode, namekey)) {
+                    logger::info("Scale {:X}: removed scene scale/heel compensation left over outside a scene", actor->GetFormID());
+                    modernInterface->UpdateNodeTransforms(actor, false, female, basenode);
+                }
+                if (RemoveLegScale(actor, female)) {
+                    logger::info("Heels {:X}: removed leg shortening left over outside a scene", actor->GetFormID());
+                }
             }
+            CheckKneeMorphLeftover(actor);
         }
     }
 

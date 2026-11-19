@@ -1,14 +1,16 @@
 #include "StripData.h"
 
 #include "StripYaml.h"
+#include "Util/SafeYaml.h"
 
 namespace UserData
 {
     void StripData::Load()
     {
+        std::scoped_lock lock{ _m };
         try {
             const auto handler = RE::TESDataHandler::GetSingleton();
-            _root = YAML::LoadFile(STRIP_PATH);
+            _root = Util::SafeYaml::Load(STRIP_PATH);
             for (const auto&& mod : _root) {
                 const auto esp = mod.first.as<std::string>();
                 if (handler->LookupModByName(esp) == nullptr) {
@@ -46,6 +48,7 @@ namespace UserData
     // and the next game start restores it.
     void StripData::RemoveArmor(RE::TESForm* a_form)
     {
+        std::scoped_lock lock{ _m };
         strips.erase(a_form->formID);
         const auto [file, id] = FileEntry(a_form->formID);
         if (!file.empty()) {
@@ -56,6 +59,7 @@ namespace UserData
     // Reset Strip Overrides: settings of plugins that are not loaded now stay in the file for when they come back
     void StripData::RemoveArmorAll()
     {
+        std::scoped_lock lock{ _m };
         strips.clear();
         const auto handler = RE::TESDataHandler::GetSingleton();
         StripYaml::EraseLoaded(_root, [handler](const std::string& a_file) { return handler->LookupModByName(a_file) != nullptr; });
@@ -63,6 +67,7 @@ namespace UserData
 
     void StripData::Save()
     {
+        std::scoped_lock lock{ _m };
         try {
             for (auto&& [formid, strip] : strips) {
                 const auto [file, id] = FileEntry(formid);
@@ -72,7 +77,7 @@ namespace UserData
                 }
                 StripYaml::Write(_root, file, id, static_cast<int32_t>(strip));
             }
-            std::ofstream{ STRIP_PATH } << _root;
+            Util::SafeYaml::Save(STRIP_PATH, _root);
         } catch (const std::exception& e) {
             logger::error("Unable to save StripConfig. Error: {}", e.what());
         }
@@ -81,11 +86,14 @@ namespace UserData
 
     Strip StripData::CheckStrip(RE::TESForm* a_form)
     {
-        const auto it = strips.find(a_form->formID);
-        if (it == strips.end() || it->second == Strip::None) {
-            return CheckKeywords(a_form);
+        {
+            std::scoped_lock lock{ _m };
+            const auto it = strips.find(a_form->formID);
+            if (it != strips.end() && it->second != Strip::None) {
+                return it->second;
+            }
         }
-        return it->second;
+        return CheckKeywords(a_form);
     }
 
     Strip StripData::CheckKeywords(RE::TESForm* a_form)

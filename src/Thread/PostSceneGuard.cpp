@@ -1,5 +1,7 @@
 #include "PostSceneGuard.h"
 
+#include "Hooks.h"
+
 #include "Registry/Define/RaceKey.h"
 #include "Registry/Util/Scale.h"
 
@@ -53,6 +55,8 @@ namespace Thread::PostSceneGuard
 
 		std::vector<TiltWatch> tiltWatches;
 		StanceState stance;
+		float blockedOutside{ 0.0f };  // time the draw block has been on with the player outside every scene
+		constexpr float kBlockOutsideLimit{ 3.0f };
 
 		std::string_view StateName(RE::WEAPON_STATE a_state)
 		{
@@ -365,8 +369,32 @@ namespace Thread::PostSceneGuard
 		if (!player || !player->Get3D()) {
 			return;
 		}
+		// The block is set when the player's scene starts animating and lifted when the thread is destroyed; a scene
+		// that never got its cleanup (crash of the thread, a load in the middle) would leave the player unable to draw.
+		if (a_drawBlocked && !InScene(player)) {
+			blockedOutside += a_delta;
+			if (blockedOutside >= kBlockOutsideLimit) {
+				Hooks::SetWeaponDrawBlocked(false);
+				logger::warn("Stance guard: weapon draw was still blocked {:.1f}s after the player left every scene; unblocked.", blockedOutside);
+				blockedOutside = 0.0f;
+				a_drawBlocked = false;
+			}
+		} else {
+			blockedOutside = 0.0f;
+		}
 		UpdateStanceInScene(player, a_delta, a_drawBlocked);
 		UpdateStanceAfterScene(player, a_delta);
 		UpdateTilt(a_delta);
+	}
+
+	void Reset()
+	{
+		{
+			std::scoped_lock lock{ pendingLock };
+			pendingEnds.clear();
+		}
+		tiltWatches.clear();
+		stance = StanceState{};
+		blockedOutside = 0.0f;
 	}
 }

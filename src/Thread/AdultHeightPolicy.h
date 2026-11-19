@@ -36,11 +36,27 @@ namespace Thread::AdultHeight
         bool normalAnnotation;
     };
 
-    // Petite is judged on the actor's own height relative to their race (NPC height x reference scale), not on the
-    // rendered scale: a 0.8 NPC of a 1.03 race renders at 0.824 and must still count as petite.
+    // The actor's own height relative to their race (NPC height x reference scale x skeleton scale).
     inline float RaceRelativeHeight(float a_scale, float a_raceHeight)
     {
         return std::isfinite(a_raceHeight) && a_raceHeight > 0.0f ? a_scale / a_raceHeight : a_scale;
+    }
+
+    // The height a petite check compares with fPetiteAdultScale: an actor is petite when she is short by EITHER
+    // measure. Relative to the race: a 0.8 NPC of a 1.03 race renders at 0.824 and must still count as petite.
+    // Rendered: an actor short because of her race (a 0.8 race) is short on screen and must count as petite too;
+    // the relative height alone (2.19.5) made her normal, so she got normal scenes and was stretched.
+    inline float PetiteHeight(float a_scale, float a_raceHeight)
+    {
+        return std::min(a_scale, RaceRelativeHeight(a_scale, a_raceHeight));
+    }
+
+    // The scene scale for a petite actor shorter than fPetiteMinScale: she is raised to it, so a broken or extreme
+    // tiny scale never plays a scene. At or above the floor (or with the floor off) she keeps her own height.
+    inline std::optional<float> PetiteFloorScale(float a_scale, float a_floor)
+    {
+        if (!std::isfinite(a_scale) || a_scale <= 0.0f || !std::isfinite(a_floor) || a_floor <= 0.0f) return std::nullopt;
+        return a_scale < a_floor ? std::optional{ a_floor } : std::nullopt;
     }
 
     inline Profile Classify(std::span<const Participant> a_actors, float a_threshold)
