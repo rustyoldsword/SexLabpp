@@ -53,6 +53,9 @@ namespace Papyrus::Patches
     {
         std::vector<std::string> ret{};
 
+        // Drench is WetFunction NG's successor; either one wets the actors of a scene
+        const auto drench = SksePlugin({ "Drench" });
+        ret.push_back(Line("Drench", !drench.empty(), Installed(drench)));
         const auto wfng = SksePlugin({ "WetFunctionNG", "WetFunction NG" });
         ret.push_back(Line("WetFunction NG", !wfng.empty(), Installed(wfng)));
 
@@ -62,6 +65,10 @@ namespace Papyrus::Patches
 
         // Whether Afterglow or SexLab paints the overlays is a Papyrus/StorageUtil flag; the MCM page adds it
         ret.push_back(Line("Afterglow", HasFile("SLACS_2_Plus_SCO.esp"), HasFile("SLACS_2_Plus_SCO.esp") ? "Installed" : "Not installed"));
+        // Afterglow 2.0 is a separate mod (Afterglow.dll + Afterglow.esp). Its own line, so the menu's check of the old
+        // Afterglow's "who paints" flag (script SLPPlusUBECum, absent with 2.0) is never reached for it.
+        const auto afterglow2 = SksePlugin({ "Afterglow" });
+        ret.push_back(Line("Afterglow 2.0", !afterglow2.empty() && HasFile("Afterglow.esp"), Installed(afterglow2)));
 
         const auto heelsFix = SksePlugin({ "HeelsFixNative" });
         ret.push_back(Line("Heels Fix NG", !heelsFix.empty(),
