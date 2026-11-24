@@ -41,7 +41,15 @@ namespace Registry
       actor(a_actor), value(Value::None), scale(Scale::GetSingleton()->GetScale(a_actor)),
       height(Scale::GetSingleton()->GetPetiteHeight(a_actor))
     {
-        const auto sex = Registry::GetSex(a_actor);
+        const RaceKey race{ a_actor };
+        auto sex = Registry::GetSex(a_actor);
+        if (!race.Is(RaceKey::Human) && sex == Sex::Futa) {
+            // A creature cannot store a humanoid gender override in its race bits.
+            sex = Registry::GetSex(a_actor, true);
+            if (sex == Sex::Futa) {
+                sex = Sex::Female;
+            }
+        }
         switch (sex) {
         case Sex::Female:
             value.set(Female);
@@ -55,7 +63,6 @@ namespace Registry
         default:
             throw std::runtime_error(std::format("Cannt build fragment from Actor {:X}: Invalid Sex: {}", a_actor->GetFormID(), std::to_underlying(sex)));
         }
-        const RaceKey race{ a_actor };
         switch (race.value) {
         case RaceKey::None:
             throw std::runtime_error(std::format("Cannt build fragment from Actor {:X}: Invalid RaceKey", a_actor->GetFormID()));
@@ -92,8 +99,11 @@ namespace Registry
         ret.set(Sex::s);
         SET_SEX(Male);
         SET_SEX(Female);
-        SET_SEX(Futa);
 #undef SET_SEX
+        // Creatures use the humanoid Futa bit as part of their packed race key.
+        if (value.all(Human, Futa)) {
+            ret.set(Sex::Futa);
+        }
         return ret;
     }
 

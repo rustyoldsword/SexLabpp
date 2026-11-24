@@ -11,7 +11,7 @@
 
 namespace
 {
-    constexpr std::string_view PETITE_ADULT_TAG{ "Petite" };
+    constexpr std::string_view PETITE_ADULT_TAG{ "~Petite,~loli,~shota" };
     constexpr std::string_view PETITE_MALE_SMF_TAG{ "smf" };
     constexpr std::string_view PETITE_MALE_MSMF_TAG{ "msmf" };
     constexpr std::string_view PETITE_MALE_SMSMF_TAG{ "smsmf" };
@@ -254,7 +254,7 @@ namespace Thread
     {
         const auto library = Registry::Library::GetSingleton();
         if (Settings::bPatchPetite) {
-            voice = library->GetVoice(actor, Registry::TagDetails{ IsShortAdultActor(actor) ? PETITE_ADULT_TAG : "-Petite"sv });
+            voice = library->GetVoice(actor, Registry::TagDetails{ IsShortAdultActor(actor) ? PETITE_ADULT_TAG : "-Petite,-loli,-shota"sv });
             if (!voice) {
                 logger::warn("No {} voice found for actor {:X}.", IsShortAdultActor(actor) ? "Petite" : "normal", actor->GetFormID());
             }
